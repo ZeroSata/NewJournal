@@ -1,8 +1,8 @@
-# Blueprint для Render: https://render.com/docs/blueprint-spec
 services:
   - type: web
     name: journal-react
     runtime: node
+    rootDir: frontend
     plan: free
     buildCommand: npm install --include=dev && npm run build
     startCommand: npm start
@@ -10,6 +10,5 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 20
-      # Пароль на весь сайт (рекомендуется). Render спросит значение при создании.
       - key: SITE_PASSWORD
         sync: false
