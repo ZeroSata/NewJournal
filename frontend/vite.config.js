@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import http2 from 'node:http2'
 import https from 'node:https'
+import os from 'node:os'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Прокси к API журнала.
@@ -11,12 +12,23 @@ import https from 'node:https'
 //  - GET и авторизованные POST проходят по HTTP/2 (node:http2);
 //  - /auth/login и /auth/refresh (неавторизованные POST) проходят по HTTP/1.1.
 //
+// Безопасность (см. анализ проекта):
+//  - прокси обслуживает ТОЛЬКО пути /api/v2/* — другие пути идут мимо;
+//  - по умолчанию сервер слушает только localhost, а прокси отвечает 403
+//    на запросы с чужим Host-заголовком (защита от «чужих» запросов при
+//    случайном `vite --host`). Дополнить allowlist можно переменной
+//    окружения PROXY_EXTRA_HOSTS="192.168.1.10,journal.local" (без порта).
+//
 // Прокси работает и в dev (npm run dev), и в prod-сборке (npm run preview).
+// Для настоящего production нужна отдельная обвязка (Node/Express-сервер
+// или Cloudflare Worker с той же логикой h2/h1) — `vite preview` не для этого.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const MSAPI_HOST = 'msapi.top-academy.ru'
 // Пути, которые всегда идут по HTTP/1.1 (иначе DDoS-Guard молча режет ответ)
 const H1_PATHS = ['/api/v2/auth/login', '/api/v2/auth/refresh']
+// Единственный префикс, который прокси пересылает наружу
+const PROXY_PREFIX = '/api/v2/'
 
 const BASE_HEADERS = {
   'user-agent':
@@ -24,6 +36,36 @@ const BASE_HEADERS = {
   referer: 'https://journal.top-academy.ru/',
   origin: 'https://journal.top-academy.ru',
   'accept-encoding': 'identity',
+}
+
+// ── Allowlist хостов ─────────────────────────────────────────────────────────
+function buildHostAllowlist() {
+  const base = new Set(['localhost', '127.0.0.1', '[::1]', '::1', '::ffff:127.0.0.1'])
+  try {
+    for (const ifc of Object.values(os.networkInterfaces())) {
+      for (const addr of ifc || []) {
+        if (addr?.address) base.add(addr.address)
+      }
+    }
+  } catch { /* noop */ }
+  const extra = (process.env.PROXY_EXTRA_HOSTS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  for (const h of extra) base.add(h)
+  return base
+}
+const ALLOWED_HOSTS = buildHostAllowlist()
+
+/** Host без порта; для IPv6 в скобках оставляем скобки */
+function hostOnly(rawHost) {
+  if (!rawHost) return ''
+  const host = String(rawHost).trim().toLowerCase()
+  if (host.startsWith('[')) {
+    const end = host.indexOf(']')
+    return end === -1 ? host : host.slice(0, end + 1)
+  }
+  return host.split(':')[0]
 }
 
 /** Запрос по HTTP/2 */
@@ -113,7 +155,24 @@ async function forward(method, path, reqHeaders, body) {
 
 function makeProxyHandler() {
   return async function handler(req, res) {
+    // Только localhost и хосты из allowlist: чужие получают 403,
+    // чтобы никто из сети не гонял запросы через этот прокси
+    if (!ALLOWED_HOSTS.has(hostOnly(req.headers.host))) {
+      res.statusCode = 403
+      res.setHeader('Content-Type', 'application/json')
+      res.end(JSON.stringify({ message: 'Proxy: host not allowed' }))
+      return
+    }
+
     const url = new URL(req.url, 'http://localhost')
+    // Проксируем только API журнала: любые другие пути отдаём 404
+    if (!url.pathname.startsWith(PROXY_PREFIX)) {
+      res.statusCode = 404
+      res.setHeader('Content-Type', 'application/json')
+      res.end(JSON.stringify({ message: 'Proxy: only /api/v2/* is allowed' }))
+      return
+    }
+
     const path = url.pathname + url.search
     const chunks = []
     for await (const c of req) chunks.push(c)
@@ -141,25 +200,26 @@ function makeProxyHandler() {
   }
 }
 
+function proxyMiddleware(req, res, next) {
+  if (req.url && req.url.startsWith('/api/')) return makeProxyHandler()(req, res)
+  next()
+}
+
 const proxyPlugin = {
   name: 'msapi-h2-proxy',
   configureServer(server) {
-    server.middlewares.use((req, res, next) => {
-      if (req.url && req.url.startsWith('/api/')) return makeProxyHandler()(req, res)
-      next()
-    })
+    server.middlewares.use(proxyMiddleware)
   },
   configurePreviewServer(server) {
-    server.middlewares.use((req, res, next) => {
-      if (req.url && req.url.startsWith('/api/')) return makeProxyHandler()(req, res)
-      next()
-    })
+    server.middlewares.use(proxyMiddleware)
   },
 }
 
 export default defineConfig({
   plugins: [react(), proxyPlugin],
-  server: { port: 5173 },
-  preview: { port: 4173 },
-  build: { outDir: 'dist', chunkSizeWarningLimit: 1600 },
+  // По умолчанию слушаем только localhost: чтобы прокси был доступен в локальной
+  // сети, запустите с --host и добавьте адрес в PROXY_EXTRA_HOSTS
+  server: { port: 5173, host: 'localhost' },
+  preview: { port: 4173, host: 'localhost' },
+  build: { outDir: 'dist', chunkSizeWarningLimit: 900 },
 })

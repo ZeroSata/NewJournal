@@ -1,14 +1,17 @@
 import React, { useState } from 'react'
+import { useQuery, useMutation } from '@tanstack/react-query'
 import {
   Sun, Moon, Monitor, Languages, Zap, Info, User, LogOut, Eraser, BookOpen,
-  ListTree, ChevronDown, Eye, EyeOff,
+  ListTree, ChevronDown, Eye, EyeOff, Bell, KeyRound, Users, ShieldCheck,
 } from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { useSettings } from '../settings/SettingsContext'
 import { useI18n } from '../i18n/I18nContext'
 import { useNavigate } from 'react-router-dom'
 import { AUTO_RATED_KEY } from '../api/constants'
-import { Card } from '../components/ui'
+import { qk } from '../api/queryKeys'
+import { apiProfileSettings, apiChangePassword } from '../api/endpoints'
+import { Card, ErrorBox } from '../components/ui'
 import { autoRateStats } from '../hooks/useAutoRate'
 import { NAV_ITEMS } from '../components/navItems'
 
@@ -54,6 +57,7 @@ function NavMenuPicker() {
           type="button"
           className="btn btn--ghost w-full !justify-between"
           onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
         >
           <span className="inline-flex items-center gap-2">
             <ListTree size={16} />
@@ -114,17 +118,180 @@ function NavMenuPicker() {
   )
 }
 
+/** Смена пароля */
+function PasswordForm() {
+  const { t } = useI18n()
+  const [oldPassword, setOld] = useState('')
+  const [newPassword, setNew] = useState('')
+  const [repeat, setRepeat] = useState('')
+  const [msg, setMsg] = useState(null)
+
+  // Правило оригинального клиента: 8+ символов, две заглавные и две строчные
+  const PASS_RE = /^(?=.*[A-Z].*[A-Z])(?=.*[a-z].*[a-z])[0-9a-zA-Z!@#$%^&*]{8,}$/
+
+  const mutation = useMutation({
+    mutationFn: () => apiChangePassword({ oldPassword, newPassword, repeatNewPassword: repeat }),
+    onSuccess: () => {
+      setMsg({ ok: true, text: t('setPassOk') })
+      setOld('')
+      setNew('')
+      setRepeat('')
+    },
+    onError: (e) => setMsg({ ok: false, text: e?.message || t('setPassFail') }),
+  })
+
+  const submit = (e) => {
+    e.preventDefault()
+    if (!oldPassword || !newPassword || !repeat) {
+      setMsg({ ok: false, text: t('setPassFill') })
+      return
+    }
+    if (newPassword !== repeat) {
+      setMsg({ ok: false, text: t('setPassMismatch') })
+      return
+    }
+    if (!PASS_RE.test(newPassword)) {
+      setMsg({ ok: false, text: t('setPassRule') })
+      return
+    }
+    mutation.mutate()
+  }
+
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-3">
+      <div className="text-sm font-semibold flex items-center gap-2">
+        <KeyRound size={15} />
+        {t('setPassTitle')}
+      </div>
+      <div className="flex flex-wrap gap-3">
+        <input
+          type="password"
+          className="field flex-1 !min-w-[180px]"
+          placeholder={t('setPassOld')}
+          value={oldPassword}
+          onChange={(e) => setOld(e.target.value)}
+          autoComplete="current-password"
+          aria-label={t('setPassOld')}
+        />
+        <input
+          type="password"
+          className="field flex-1 !min-w-[180px]"
+          placeholder={t('setPassNew')}
+          value={newPassword}
+          onChange={(e) => setNew(e.target.value)}
+          autoComplete="new-password"
+          aria-label={t('setPassNew')}
+        />
+        <input
+          type="password"
+          className="field flex-1 !min-w-[180px]"
+          placeholder={t('setPassRepeat')}
+          value={repeat}
+          onChange={(e) => setRepeat(e.target.value)}
+          autoComplete="new-password"
+          aria-label={t('setPassRepeat')}
+        />
+      </div>
+      <div className="text-xs text-muted">{t('setPassRule')}</div>
+      {msg && (
+        <div
+          className="text-xs font-semibold rounded-lg px-3 py-2"
+          style={{
+            background: msg.ok ? 'var(--success-soft)' : 'var(--danger-soft)',
+            color: msg.ok ? 'var(--success)' : 'var(--danger)',
+          }}
+        >
+          {msg.text}
+        </div>
+      )}
+      <div>
+        <button type="submit" className="btn btn--primary !py-2 text-sm" disabled={mutation.isPending}>
+          {mutation.isPending ? t('setPassSaving') : t('setPassSave')}
+        </button>
+      </div>
+    </form>
+  )
+}
+
+/** Переключатель активной группы (если их несколько) */
+function GroupSwitcher() {
+  const { t } = useI18n()
+  const { user, switchGroup } = useAuth()
+  const [msg, setMsg] = useState(null)
+  const groups = Array.isArray(user?.groups) ? user.groups : []
+  if (groups.length <= 1) return null
+
+  const onChange = async (e) => {
+    const id = Number(e.target.value)
+    if (!id || id === user.current_group_id) return
+    setMsg(null)
+    try {
+      await switchGroup(id)
+      setMsg({ ok: true, text: t('setGroupSwitched') })
+    } catch (err) {
+      setMsg({ ok: false, text: err?.message || t('setGroupSwitchFail') })
+    }
+  }
+
+  return (
+    <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
+      <div className="text-sm font-semibold mb-2 flex items-center gap-2">
+        <Users size={15} />
+        {t('setGroupSwitch')}
+      </div>
+      <p className="text-xs text-muted mb-2">{t('setGroupSwitchHint')}</p>
+      <select
+        className="field !w-auto !py-2 text-sm"
+        value={user.current_group_id}
+        onChange={onChange}
+        aria-label={t('setGroupSwitch')}
+      >
+        {groups.map((g) => (
+          <option key={g.id} value={g.id}>
+            {g.name}{g.is_primary ? ' ★' : ''}
+          </option>
+        ))}
+      </select>
+      {msg && (
+        <div
+          className="text-xs font-semibold rounded-lg px-3 py-2 mt-2"
+          style={{
+            background: msg.ok ? 'var(--success-soft)' : 'var(--danger-soft)',
+            color: msg.ok ? 'var(--success)' : 'var(--danger)',
+          }}
+        >
+          {msg.text}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function SettingsPage() {
   const { t } = useI18n()
-  const { settings, setTheme, setLang, setAutoRate, setAutoRateMark } = useSettings()
+  const { settings, setTheme, setLang, setAutoRateMode, setAutoRateMark, setDeadlineNotify } = useSettings()
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const [, force] = useState(0)
+
+  // Данные профиля: email/телефон и прочее (эндпоинт /profile/operations/settings)
+  const profile = useQuery({
+    queryKey: qk.profileSettings,
+    queryFn: apiProfileSettings,
+    staleTime: 10 * 60 * 1000,
+    retry: 0,
+  })
 
   const themeOptions = [
     { key: 'light', icon: <Sun size={16} />, label: t('setThemeLight') },
     { key: 'dark', icon: <Moon size={16} />, label: t('setThemeDark') },
     { key: 'system', icon: <Monitor size={16} />, label: t('setThemeSystem') },
+  ]
+
+  const autoRateModes = [
+    { key: 'off', label: t('setModeOff') },
+    { key: 'auto', label: t('setModeAuto') },
+    { key: 'confirm', label: t('setModeConfirm') },
   ]
 
   const handleLogout = () => {
@@ -136,6 +303,32 @@ export default function SettingsPage() {
     localStorage.removeItem(AUTO_RATED_KEY)
     force((n) => n + 1)
   }
+
+  // Включение уведомлений: сначала спрашиваем разрешение браузера
+  const enableNotifications = async (on) => {
+    if (!on) {
+      setDeadlineNotify(false)
+      return
+    }
+    if (typeof Notification === 'undefined') {
+      setDeadlineNotify(false)
+      return
+    }
+    let perm = Notification.permission
+    if (perm === 'default') {
+      try {
+        perm = await Notification.requestPermission()
+      } catch {
+        perm = 'denied'
+      }
+    }
+    setDeadlineNotify(perm === 'granted')
+  }
+
+  const notifBlocked =
+    settings.deadlineNotify === false &&
+    typeof Notification !== 'undefined' &&
+    Notification.permission === 'denied'
 
   return (
     <main className="page">
@@ -153,6 +346,7 @@ export default function SettingsPage() {
                   key={o.key}
                   className={`chip ${settings.theme === o.key ? 'is-active' : ''}`}
                   onClick={() => setTheme(o.key)}
+                  aria-pressed={settings.theme === o.key}
                 >
                   {o.icon}
                   {o.label}
@@ -169,12 +363,14 @@ export default function SettingsPage() {
               <button
                 className={`chip ${settings.lang === 'ru' ? 'is-active' : ''}`}
                 onClick={() => setLang('ru')}
+                aria-pressed={settings.lang === 'ru'}
               >
                 {t('setLangRu')}
               </button>
               <button
                 className={`chip ${settings.lang === 'en' ? 'is-active' : ''}`}
                 onClick={() => setLang('en')}
+                aria-pressed={settings.lang === 'en'}
               >
                 {t('setLangEn')}
               </button>
@@ -187,53 +383,94 @@ export default function SettingsPage() {
           <NavMenuPicker />
         </Card>
 
-        {/* Автооценка */}
+        {/* Автооценка: три режима вместо простого включателя */}
         <Card title={t('setAutoRate')} icon={<Zap size={17} />}>
-          <div className="flex items-start justify-between gap-4 mb-4">
-            <div>
-              <div className="text-sm font-semibold mb-1">{t('setAutoRateState')}</div>
-              <div className="text-xs text-muted max-w-[460px]">{t('setAutoRateDesc')}</div>
-              <div className="text-xs mt-2 font-bold" style={{ color: settings.autoRate ? 'var(--success)' : 'var(--text-muted)' }}>
-                {settings.autoRate ? t('setAutoRateOn') : t('setAutoRateOff')}
-              </div>
-            </div>
-            <Switch on={settings.autoRate} onChange={setAutoRate} label={t('setAutoRate')} />
-          </div>
-
           <div className="mb-4">
-            <div className="text-sm font-semibold mb-2">{t('setAutoRateMark')}</div>
-            <div className="flex flex-wrap gap-2">
-              {[5, 4, 3, 2].map((m) => (
+            <div className="text-sm font-semibold mb-2">{t('setAutoRateMode')}</div>
+            <div className="flex flex-wrap gap-2 mb-2">
+              {autoRateModes.map((m) => (
                 <button
-                  key={m}
-                  className={`chip ${settings.autoRateMark === m ? 'is-active' : ''}`}
-                  onClick={() => setAutoRateMark(m)}
+                  key={m.key}
+                  className={`chip ${settings.autoRateMode === m.key ? 'is-active' : ''}`}
+                  onClick={() => setAutoRateMode(m.key)}
+                  aria-pressed={settings.autoRateMode === m.key}
                 >
-                  {t(`setMark${m}`)}
+                  {m.label}
                 </button>
               ))}
             </div>
+            <div className="text-xs text-muted max-w-[520px]">
+              {settings.autoRateMode === 'auto' ? t('setModeAutoDesc') : ''}
+              {settings.autoRateMode === 'confirm' ? t('setModeConfirmDesc') : ''}
+              {settings.autoRateMode === 'off' ? t('setModeOffDesc') : ''}
+            </div>
           </div>
+
+          {settings.autoRateMode === 'auto' && (
+            <div className="mb-4">
+              <div className="text-sm font-semibold mb-2">{t('setAutoRateMark')}</div>
+              <div className="flex flex-wrap gap-2">
+                {[5, 4].map((m) => (
+                  <button
+                    key={m}
+                    className={`chip ${settings.autoRateMark === m ? 'is-active' : ''}`}
+                    onClick={() => setAutoRateMark(m)}
+                    aria-pressed={settings.autoRateMark === m}
+                  >
+                    {t(`setMark${m}`)}
+                  </button>
+                ))}
+              </div>
+              <div className="text-xs text-muted mt-2">{t('setAutoRateMarksHint')}</div>
+            </div>
+          )}
 
           <div className="text-xs text-muted mb-3 flex items-start gap-2">
             <Info size={14} className="shrink-0 mt-0.5" />
             {t('setAutoRateNote')}
           </div>
 
-          <div className="pt-3" style={{ borderTop: '1px solid var(--border)' }}>
-            <div className="text-sm font-semibold mb-1">
-              {t('setAutoRateToday')}: <b>{autoRateStats.sessionCount}</b>{' '}
-              <span className="text-muted font-normal">{t('setAutoRateTodaySession')}</span>
+          {settings.autoRateMode !== 'off' && (
+            <div className="pt-3" style={{ borderTop: '1px solid var(--border)' }}>
+              <div className="text-sm font-semibold mb-1">
+                {t('setAutoRateToday')}: <b>{autoRateStats.sessionCount}</b>{' '}
+                <span className="text-muted font-normal">{t('setAutoRateTodaySession')}</span>
+              </div>
+              <div className="text-xs text-muted mb-2">{t('setAutoRateResetDesc')}</div>
+              <button className="btn btn--ghost !py-2 text-sm" onClick={resetAutoRated}>
+                <Eraser size={15} />
+                {t('setAutoRateReset')}
+              </button>
             </div>
-            <div className="text-xs text-muted mb-2">{t('setAutoRateResetDesc')}</div>
-            <button className="btn btn--ghost !py-2 text-sm" onClick={resetAutoRated}>
-              <Eraser size={15} />
-              {t('setAutoRateReset')}
-            </button>
+          )}
+        </Card>
+
+        {/* Напоминания о дедлайнах */}
+        <Card title={t('setNotif')} icon={<Bell size={17} />}>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-sm font-semibold mb-1">{t('setNotif')}</div>
+              <div className="text-xs text-muted max-w-[460px]">{t('setNotifDesc')}</div>
+              {settings.deadlineNotify && (
+                <div className="text-xs mt-2 font-bold" style={{ color: 'var(--success)' }}>
+                  {t('setNotifGranted')}
+                </div>
+              )}
+              {notifBlocked && (
+                <div className="text-xs mt-2 font-bold" style={{ color: 'var(--danger)' }}>
+                  {t('setNotifBlocked')}
+                </div>
+              )}
+            </div>
+            <Switch
+              on={Boolean(settings.deadlineNotify)}
+              onChange={enableNotifications}
+              label={t('setNotif')}
+            />
           </div>
         </Card>
 
-        {/* Аккаунт */}
+        {/* Аккаунт: профиль, смена группы, смена пароля, выход */}
         <Card title={t('setAccount')} icon={<User size={17} />}>
           <div className="flex items-center gap-4">
             {user?.photo && (
@@ -244,17 +481,39 @@ export default function SettingsPage() {
               <div className="text-sm text-muted">
                 {t('setGroup')}: {user?.group_name} · {t('setStream')}: {user?.stream_name}
               </div>
+              {profile.data?.email && (
+                <div className="text-xs text-muted mt-0.5">email: {profile.data.email}</div>
+              )}
+              {profile.data?.phone && (
+                <div className="text-xs text-muted">tel: {profile.data.phone}</div>
+              )}
             </div>
             <button className="btn btn--ghost !py-2 text-sm" onClick={handleLogout}>
               <LogOut size={15} />
               {t('logout')}
             </button>
           </div>
+
+          <GroupSwitcher />
+
+          <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
+            <PasswordForm />
+          </div>
+
+          {profile.isError && (
+            <div className="mt-3">
+              <ErrorBox title={t('noData')} onRetry={() => profile.refetch()} />
+            </div>
+          )}
         </Card>
 
         {/* О приложении */}
         <Card title={t('setAbout')} icon={<BookOpen size={17} />}>
           <p className="text-sm text-muted m-0">{t('setAboutText')}</p>
+          <p className="text-xs text-muted mt-3 mb-0 flex items-start gap-2">
+            <ShieldCheck size={14} className="shrink-0 mt-0.5" />
+            {t('setSecurityNote')}
+          </p>
         </Card>
       </div>
     </main>

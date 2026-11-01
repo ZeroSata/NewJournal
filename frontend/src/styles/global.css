@@ -146,6 +146,21 @@ input, select, button, textarea { font: inherit; color: inherit; }
   font-weight: 700;
 }
 
+/* Оранжевая точка «сдавать сегодня» у пункта ДЗ */
+.sidebar__due-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--warning);
+  flex-shrink: 0;
+  margin-left: 4px;
+  animation: due-pulse 2s ease infinite;
+}
+@keyframes due-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
 .sidebar__footer {
   border-top: 1px solid var(--border);
   padding: 14px 16px;
@@ -197,27 +212,162 @@ input, select, button, textarea { font: inherit; color: inherit; }
 
 .page__subtitle { color: var(--text-muted); margin: 0 0 20px; }
 
-.burger { display: none; }
-
+/* ─── Мобильная адаптация (v1.2) ─────────────────────────────────────────
+   Сайдбар на мобильных скрыт — навигация переехала в нижнюю панель,
+   поэтому гамбургер больше не нужен. */
 @media (max-width: 920px) {
-  .sidebar {
-    position: fixed;
-    left: 0; top: 0; bottom: 0;
-    transform: translateX(-100%);
-    transition: transform 0.22s ease;
-    box-shadow: var(--shadow);
+  .sidebar { display: none; }
+  .page { padding: 14px 12px calc(80px + env(safe-area-inset-bottom)); }
+  .topbar { height: 54px; padding: 0 14px; }
+  .page__title { font-size: 20px; }
+  .toast {
+    bottom: calc(76px + env(safe-area-inset-bottom));
+    right: 12px;
+    left: 12px;
+    max-width: none;
   }
-  .sidebar.is-open { transform: translateX(0); }
-  .burger { display: inline-flex; }
-  .page { padding: 16px; }
 }
 
-.sidebar-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  z-index: 35;
+/* Нижняя навигация — только на мобильных */
+.bottom-nav { display: none; }
+@media (max-width: 920px) {
+  .bottom-nav {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    z-index: 45;
+    display: flex;
+    gap: 2px;
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+    background: var(--topbar-bg);
+    border-top: 1px solid var(--border);
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .bottom-nav::-webkit-scrollbar { display: none; }
 }
+.bottom-nav__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 62px;
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border-radius: 10px;
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.bottom-nav__item:hover { text-decoration: none; color: var(--text); }
+.bottom-nav__item.is-active { color: var(--accent); background: var(--accent-soft); }
+.bottom-nav__icon { position: relative; display: inline-flex; }
+.bottom-nav__icon svg { width: 20px; height: 20px; }
+.bottom-nav__label { font-size: 10px; font-weight: 600; white-space: nowrap; }
+.bottom-nav__badge {
+  position: absolute;
+  top: -5px; right: -9px;
+  min-width: 16px; height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.bottom-nav__dot {
+  position: absolute;
+  top: -3px; right: -7px;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--warning);
+  animation: due-pulse 2s ease infinite;
+}
+
+/* Малые экраны */
+@media (max-width: 560px) {
+  .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .stat-card__value { font-size: 22px; }
+  .lesson-row { gap: 10px; padding: 10px 12px; }
+  .card { padding: 14px; }
+}
+
+/* ─── Модальные окна ─────────────────────────────────────────────────────── */
+.modal-card {
+  max-height: calc(100vh - 40px);
+  display: flex;
+  flex-direction: column;
+}
+.modal-scroll { overflow-y: auto; min-height: 0; }
+@media (max-width: 920px) {
+  .modal-card { max-height: calc(100dvh - 28px); }
+}
+
+/* Зона загрузки файла (сдача ДЗ) */
+.dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 22px 16px;
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+  text-align: center;
+  font: inherit;
+}
+.dropzone:hover,
+.dropzone.is-drag { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.dropzone.is-file {
+  flex-direction: row;
+  gap: 10px;
+  padding: 10px 12px;
+  border-style: solid;
+  border-width: 1px;
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  cursor: default;
+}
+
+/* Звёзды оценки ДЗ */
+.star-btn {
+  background: none;
+  border: none;
+  padding: 2px;
+  cursor: pointer;
+  color: var(--border);
+  transition: transform 0.12s ease, color 0.12s ease;
+  display: inline-flex;
+}
+.star-btn svg { fill: transparent; transition: fill 0.12s ease; }
+.star-btn.is-on { color: var(--star); }
+.star-btn.is-on svg { fill: var(--star); }
+.star-btn:hover { transform: scale(1.12); }
+
+/* Маленький переключатель */
+.switch--sm { width: 36px; height: 20px; }
+.switch--sm::after { width: 14px; height: 14px; top: 3px; left: 3px; }
+.switch--sm.is-on::after { transform: translateX(16px); }
+
+/* Горизонтальная прокрутка таблиц на узких экранах */
+.table-scroll { overflow-x: auto; }
+.table-scroll .marks-table { min-width: 480px; }
+
+/* Список «определение — значение» (Личный кабинет) */
+.cab-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.cab-list li { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.cab-list li svg { color: var(--text-muted); flex-shrink: 0; }
+.cab-list li span { color: var(--text-muted); }
+.cab-list li b { margin-left: auto; text-align: right; }
 
 /* ─── Карточки, статы, чипы ────────────────────────────────────────────────── */
 .card {
@@ -278,6 +428,7 @@ input, select, button, textarea { font: inherit; color: inherit; }
 .tag--hw { background: var(--info-soft); color: var(--info); }
 .tag--lab { background: var(--accent-soft); color: var(--accent); }
 .tag--current { background: var(--accent-soft); color: var(--accent); }
+.tag--soon { background: var(--info-soft); color: var(--info); }
 .tag--checking { background: var(--warning-soft); color: var(--warning); }
 .tag--checked { background: var(--success-soft); color: var(--success); }
 .tag--overdue { background: var(--danger-soft); color: var(--danger); }
@@ -403,6 +554,41 @@ select.field { cursor: pointer; }
   margin: 30px auto;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* Скелетоны вместо спиннеров — вёрстка не «прыгает» при загрузке */
+.skeleton {
+  display: inline-block;
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--border) 50%, var(--surface-2) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-wave 1.4s ease infinite;
+}
+@keyframes skeleton-wave {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: none; }
+  .sidebar__due-dot { animation: none; }
+}
+
+/* Текст/таблицы для скринридеров */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Видимый фокус с клавиатуры */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 .empty {
   text-align: center;

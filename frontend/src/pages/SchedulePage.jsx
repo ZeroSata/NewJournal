@@ -1,13 +1,18 @@
 import React, { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronLeft, ChevronRight, CalendarDays, MapPin, User } from 'lucide-react'
-import { apiScheduleByDate, apiScheduleByRange, apiScheduleMonth } from '../api/endpoints'
+import { ChevronLeft, ChevronRight, CalendarDays, MapPin, User, Download, Paperclip } from 'lucide-react'
+import { apiScheduleByDate, apiScheduleByRange, apiScheduleMonth, apiStudentExams } from '../api/endpoints'
 import { useI18n } from '../i18n/I18nContext'
+import { useAuth } from '../auth/AuthContext'
+import { useDeadlines } from '../hooks/useDeadlines'
+import { qk } from '../api/queryKeys'
 import { Card, Spinner, ErrorBox, Empty, Chip } from '../components/ui'
 import { startOfWeek, startOfMonth, endOfMonth, addDays, toISO, todayISO } from '../utils/format'
+import { exportScheduleICS } from '../utils/export'
 
 export default function SchedulePage() {
   const { t, locale, fmtShort } = useI18n()
+  const { user } = useAuth()
   const [view, setView] = useState('week') // day | week | month
   const [date, setDate] = useState(() => todayISO()) // опорная дата
   const today = todayISO()
@@ -24,13 +29,42 @@ export default function SchedulePage() {
   }, [view, date])
 
   const query = useQuery({
-    queryKey: ['schedule', view, range.from, range.to],
+    queryKey: view === 'day' ? qk.scheduleDay(range.from) : ['schedule', view, range.from, range.to],
     queryFn: () => {
       if (view === 'day') return apiScheduleByDate(range.from)
       if (view === 'week') return apiScheduleByRange(range.from, range.to)
       return apiScheduleMonth(range.from)
     },
   })
+
+  // Дедлайны для вида «Месяц»: ДЗ/ЛР из лёгкого запроса + экзамены
+  const deadlines = useDeadlines(view === 'month' ? user?.current_group_id : null, {
+    enabled: view === 'month', refetch: false,
+  })
+  const exams = useQuery({
+    queryKey: qk.studentExams,
+    queryFn: apiStudentExams,
+    staleTime: 10 * 60 * 1000,
+    enabled: view === 'month',
+  })
+
+  // карта «дата → [{type, title}]» для календаря
+  const deadlineByDate = useMemo(() => {
+    const map = {}
+    const put = (iso, entry) => {
+      if (!iso) return
+      ;(map[iso] ||= []).push(entry)
+    }
+    // только несданные работы из лёгкого запроса дедлайнов
+    for (const it of deadlines.data?.items || []) {
+      if (it.homework_stud) continue
+      put(it.overdue_time, { type: 'hw', title: `${it.theme} · ${it.name_spec}` })
+    }
+    for (const e of Array.isArray(exams.data) ? exams.data : []) {
+      put(e.date, { type: 'exam', title: `${e.spec || ''} · ${t('gradesExams')}` })
+    }
+    return map
+  }, [deadlines.data, exams.data, t])
 
   const byDate = useMemo(() => {
     const map = {}
@@ -78,18 +112,27 @@ export default function SchedulePage() {
         </div>
       </div>
 
-      {/* Навигация по периоду + произвольная дата */}
+      {/* Навигация по периоду + произвольная дата + экспорт */}
       <div className="card !py-3 mb-4">
         <div className="flex flex-wrap items-center gap-2">
-          <button className="icon-btn" onClick={() => shift(-1)} title={t('schedPrev')}>
+          <button className="icon-btn" onClick={() => shift(-1)} title={t('schedPrev')} aria-label={t('schedPrev')}>
             <ChevronLeft size={18} />
           </button>
           <div className="font-semibold text-sm min-w-[220px] text-center capitalize">{periodLabel}</div>
-          <button className="icon-btn" onClick={() => shift(1)} title={t('schedNext')}>
+          <button className="icon-btn" onClick={() => shift(1)} title={t('schedNext')} aria-label={t('schedNext')}>
             <ChevronRight size={18} />
           </button>
           <button className="btn btn--ghost !py-2 text-sm" onClick={() => setDate(today)}>
             {t('today')}
+          </button>
+          <button
+            className="btn btn--ghost !py-2 text-sm"
+            onClick={() => exportScheduleICS(query.data || [], `schedule-${range.from}.ics`)}
+            disabled={!query.data?.length}
+            title={t('expSchedule')}
+          >
+            <Download size={15} />
+            {t('expSchedule')}
           </button>
           <label className="ml-auto flex items-center gap-2 text-xs text-muted">
             {t('schedPickDate')}
@@ -98,6 +141,7 @@ export default function SchedulePage() {
               className="field !w-auto !py-1.5 text-sm"
               value={date}
               onChange={(e) => e.target.value && setDate(e.target.value)}
+              aria-label={t('schedPickDate')}
             />
           </label>
         </div>
@@ -112,7 +156,7 @@ export default function SchedulePage() {
       ) : view === 'week' ? (
         <WeekView days={daysOfWeek(range.from)} byDate={byDate} today={today} locale={locale} t={t} openDay={openDay} />
       ) : (
-        <MonthView monthDate={date} byDate={byDate} today={today} locale={locale} t={t} openDay={openDay} />
+        <MonthView monthDate={date} byDate={byDate} today={today} locale={locale} t={t} openDay={openDay} deadlineByDate={deadlineByDate} />
       )}
     </main>
   )
@@ -217,7 +261,7 @@ function WeekView({ days, byDate, today, locale, t, openDay }) {
   )
 }
 
-function MonthView({ monthDate, byDate, today, locale, t, openDay }) {
+function MonthView({ monthDate, byDate, today, locale, t, openDay, deadlineByDate = {} }) {
   const d = new Date(monthDate + 'T12:00:00')
   // Сетка с понедельника недели, содержащей 1-е число (6 недель)
   const gridStart = startOfWeek(startOfMonth(d))
@@ -240,6 +284,7 @@ function MonthView({ monthDate, byDate, today, locale, t, openDay }) {
           const cd = new Date(iso + 'T12:00:00')
           const inMonth = cd.getMonth() === monthNum
           const list = byDate[iso] || []
+          const dl = deadlineByDate[iso] || []
           const isToday = iso === today
           return (
             <button
@@ -253,6 +298,10 @@ function MonthView({ monthDate, byDate, today, locale, t, openDay }) {
                 cursor: 'pointer',
                 boxShadow: isToday ? '0 0 0 2px var(--accent-soft)' : undefined,
               }}
+              title={[
+                ...list.slice(0, 3).map((l) => `${l.started_at} ${l.subject_name}`),
+                ...dl.slice(0, 4).map((e) => `${t('calDeadlines')}: ${e.title}`),
+              ].join('\n')}
             >
               <div className="text-xs font-bold" style={{ color: isToday ? 'var(--accent)' : 'inherit' }}>
                 {cd.getDate()}
@@ -269,11 +318,56 @@ function MonthView({ monthDate, byDate, today, locale, t, openDay }) {
                   </div>
                 </>
               )}
+              {/* Дедлайны: ДЗ/ЛР — скрепка, экзамен — шапочка */}
+              {dl.length > 0 && (
+                <div className="flex items-center gap-1 flex-wrap">
+                  {dl.slice(0, 3).map((e, i) => (
+                    <span
+                      key={i}
+                      className="inline-flex items-center gap-0.5 rounded-md px-1"
+                      style={{
+                        background: e.type === 'exam' ? 'var(--info-soft)' : 'var(--warning-soft)',
+                        color: e.type === 'exam' ? 'var(--info)' : 'var(--warning)',
+                        fontSize: 9,
+                        fontWeight: 700,
+                        maxWidth: '100%',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      <Paperclip size={8} />
+                      {e.type === 'exam' ? t('calExamDeadline') : t('calHwDeadline')}
+                    </span>
+                  ))}
+                  {dl.length > 3 && <span className="text-[9px] text-muted">+{dl.length - 3}</span>}
+                </div>
+              )}
             </button>
           )
         })}
       </div>
-      <p className="text-xs text-muted mt-3 mb-0 text-center">{t('schedClickDay')}</p>
+      <div className="flex flex-wrap items-center justify-center gap-3 mt-3 text-[11px] text-muted">
+        <span className="inline-flex items-center gap-1">
+          <span className="w-2 h-2 rounded-full" style={{ background: 'var(--accent)' }} /> {t('schedLesson')}
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <Paperclip size={10} style={{ color: 'var(--warning)' }} /> {t('calHwDeadline')}/{t('calLabDeadline')}
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <GraduationCapIcon /> {t('calExamDeadline')}
+        </span>
+      </div>
+      <p className="text-xs text-muted mt-2 mb-0 text-center">{t('schedClickDay')}</p>
     </Card>
+  )
+}
+
+function GraduationCapIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--info)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M22 10 12 5 2 10l10 5 10-5Z" />
+      <path d="M6 12v5c0 1.7 2.7 3 6 3s6-1.3 6-3v-5" />
+    </svg>
   )
 }

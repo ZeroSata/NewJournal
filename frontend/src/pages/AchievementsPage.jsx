@@ -4,17 +4,8 @@ import { Trophy, Gem, Coins, Lock, CheckCircle2 } from 'lucide-react'
 import { apiAchievements } from '../api/endpoints'
 import { useAuth } from '../auth/AuthContext'
 import { useI18n } from '../i18n/I18nContext'
+import { prettyKey } from '../utils/format'
 import { Card, StatCard, Spinner, ErrorBox, Empty } from '../components/ui'
-
-/** Человекочитаемое имя достижения, если нет перевода */
-function prettyKey(key) {
-  return String(key || '')
-    .toLowerCase()
-    .split('_')
-    .filter(Boolean)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(' ')
-}
 
 export default function AchievementsPage() {
   const { t } = useI18n()

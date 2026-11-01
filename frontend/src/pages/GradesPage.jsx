@@ -1,21 +1,24 @@
 import React, { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { BarChart3, ListChecks, GraduationCap, CalendarCheck } from 'lucide-react'
-import { apiStudentVisits, apiStudentExams, apiAcademicPerformance } from '../api/endpoints'
+import { BarChart3, ListChecks, GraduationCap, CalendarCheck, Download, Calculator } from 'lucide-react'
+import { apiStudentVisits, apiStudentExams, apiAcademicPerformance, apiQuarterlyGrades } from '../api/endpoints'
 import { MARK_FIELDS } from '../api/constants'
+import { qk } from '../api/queryKeys'
 import { useI18n } from '../i18n/I18nContext'
 import { Card, Spinner, ErrorBox, Empty, Chip, MarkPill } from '../components/ui'
 import { SubjectAverageChart, MarksDistributionChart } from '../components/charts'
-import { normalize } from '../utils/format'
+import { exportMarksCSV } from '../utils/export'
+import { fmtShortDate } from '../utils/format'
 
 export default function GradesPage() {
   const { t, fmtShort } = useI18n()
   const [subject, setSubject] = useState('all')
   const [visible, setVisible] = useState(25)
 
-  const visits = useQuery({ queryKey: ['student-visits'], queryFn: apiStudentVisits, staleTime: 5 * 60 * 1000 })
-  const exams = useQuery({ queryKey: ['student-exams'], queryFn: apiStudentExams, staleTime: 10 * 60 * 1000 })
-  const perf = useQuery({ queryKey: ['academic-performance'], queryFn: apiAcademicPerformance })
+  const visits = useQuery({ queryKey: qk.studentVisits, queryFn: apiStudentVisits, staleTime: 5 * 60 * 1000 })
+  const exams = useQuery({ queryKey: qk.studentExams, queryFn: apiStudentExams, staleTime: 10 * 60 * 1000 })
+  const perf = useQuery({ queryKey: qk.academicPerformance, queryFn: apiAcademicPerformance })
+  const quarterly = useQuery({ queryKey: qk.quarterlyGrades, queryFn: apiQuarterlyGrades, staleTime: 30 * 60 * 1000, retry: 0 })
 
   const marked = useMemo(
     () => (visits.data || []).filter((v) => MARK_FIELDS.some((f) => v[f.key] != null)),
@@ -73,7 +76,8 @@ export default function GradesPage() {
       else if (v.status_was === 2) late += 1
     }
     const total = present + absent + late
-    return { present, absent, late, total, percent: total ? Math.round((present / total) * 100) : null }
+    // как на оригинальном сайте: опоздание приравнивается к «был»
+    return { present, absent, late, total, percent: total ? Math.round(((present + late) / total) * 100) : null }
   }, [visits.data])
 
   const recent = useMemo(
@@ -84,6 +88,51 @@ export default function GradesPage() {
         .slice(0, visible),
     [filtered, visible]
   )
+
+  // ── Калькулятор среднего балла «что если» ─────────────────────────────────
+  const allMarks = useMemo(() => {
+    let sum = 0
+    let n = 0
+    for (const v of marked) {
+      for (const f of MARK_FIELDS) {
+        const m = v[f.key]
+        if (m == null || m === '') continue
+        const num = Number(m)
+        if (Number.isNaN(num)) continue
+        sum += num
+        n += 1
+      }
+    }
+    return { sum, n, avg: n ? sum / n : null }
+  }, [marked])
+
+  const [target, setTarget] = useState('4.5')
+  const [planMark, setPlanMark] = useState('5')
+
+  const whatIf = useMemo(() => {
+    const tgt = Number(target)
+    const m = Number(planMark)
+    if (!Number.isFinite(tgt) || tgt <= 0 || tgt > 5 || !Number.isFinite(m)) return null
+    const { sum, n } = allMarks
+    if (!n) return null
+    if (sum / n >= tgt) return { state: 'done', needed: 0 }
+    if (m <= tgt) return { state: 'impossible' }
+    // (sum + m*k) / (n + k) >= tgt  →  k >= (tgt*n - sum) / (m - tgt)
+    const k = Math.max(0, Math.ceil((tgt * n - sum) / (m - tgt) - 1e-9))
+    return { state: 'ok', needed: k }
+  }, [target, planMark, allMarks])
+
+  const handleExportCSV = () => {
+    exportMarksCSV(
+      recent.map((v) => ({
+        date: fmtShortDate(v.date_visit),
+        subject: v.spec_name || '',
+        theme: v.lesson_theme || '',
+        marks: MARK_FIELDS.filter((f) => v[f.key] != null).map((f) => v[f.key]).join(', '),
+      })),
+      `marks-${subject === 'all' ? 'all' : subject}.csv`
+    )
+  }
 
   if (visits.isLoading) {
     return (
@@ -99,7 +148,7 @@ export default function GradesPage() {
       <h1 className="page__title">{t('gradesTitle')}</h1>
       <p className="page__subtitle">
         {visits.data?.length && attendance.percent != null
-          ? `${t('gradesVisited')}: ${attendance.percent}% (${attendance.present}/${attendance.total})`
+          ? `${t('gradesVisited')}: ${attendance.percent}% (${attendance.present + attendance.late}/${attendance.total})`
           : ''}
       </p>
 
@@ -136,6 +185,72 @@ export default function GradesPage() {
             </Card>
           )}
 
+          {/* Четвертные (периодические) оценки */}
+          <Card title={t('gradesQuarterly')} icon={<CalendarCheck size={17} />} className="mb-4">
+            {quarterly.isLoading ? (
+              <Spinner />
+            ) : quarterly.isError ? (
+              <ErrorBox onRetry={() => quarterly.refetch()} />
+            ) : !quarterly.data?.grades?.length ? (
+              <Empty text={t('gradesQuarterlyEmpty')} icon={CalendarCheck} />
+            ) : (
+              <QuarterlyTable grades={quarterly.data.grades} t={t} />
+            )}
+          </Card>
+
+          {/* Калькулятор среднего балла */}
+          {allMarks.n > 0 && (
+            <Card title={t('gradesWhatIf')} icon={<Calculator size={17} />} className="mb-4">
+              <p className="text-xs text-muted mb-3">{t('gradesWhatIfDesc')}</p>
+              <div className="flex flex-wrap items-center gap-3 mb-3">
+                <label className="flex items-center gap-2 text-sm">
+                  {t('gradesWhatIfTarget')}
+                  <input
+                    type="number"
+                    className="field !w-24 !py-1.5"
+                    min="2"
+                    max="5"
+                    step="0.05"
+                    value={target}
+                    onChange={(e) => setTarget(e.target.value)}
+                    aria-label={t('gradesWhatIfTarget')}
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  {t('gradesWhatIfMark')}
+                  <select
+                    className="field !w-auto !py-1.5"
+                    value={planMark}
+                    onChange={(e) => setPlanMark(e.target.value)}
+                    aria-label={t('gradesWhatIfMark')}
+                  >
+                    <option value="5">5</option>
+                    <option value="4">4</option>
+                    <option value="3">3</option>
+                  </select>
+                </label>
+                <span className="text-xs text-muted">
+                  {t('gradesWhatIfNow')}: <b>{allMarks.avg.toFixed(2)}</b> ({allMarks.n})
+                </span>
+              </div>
+              {whatIf?.state === 'ok' && (
+                <div className="text-sm font-semibold" style={{ color: 'var(--accent)' }}>
+                  {t('gradesWhatIfResult', { n: whatIf.needed, m: planMark })}
+                </div>
+              )}
+              {whatIf?.state === 'done' && (
+                <div className="text-sm font-semibold" style={{ color: 'var(--success)' }}>
+                  {t('gradesWhatIfDone')}
+                </div>
+              )}
+              {whatIf?.state === 'impossible' && (
+                <div className="text-sm font-semibold" style={{ color: 'var(--danger)' }}>
+                  {t('gradesWhatIfImpossible')}
+                </div>
+              )}
+            </Card>
+          )}
+
           {subjects.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 mb-3">
               <Chip active={subject === 'all'} onClick={() => setSubject('all')}>{t('all')}</Chip>
@@ -145,7 +260,19 @@ export default function GradesPage() {
             </div>
           )}
 
-          <Card title={t('gradesRecent')} icon={<ListChecks size={17} />} className="mb-4">
+          <Card
+            title={t('gradesRecent')}
+            icon={<ListChecks size={17} />}
+            className="mb-4"
+            actions={
+              recent.length > 0 ? (
+                <button className="btn btn--ghost !py-1.5 !px-3 text-xs" onClick={handleExportCSV}>
+                  <Download size={14} />
+                  {t('expCsv')}
+                </button>
+              ) : null
+            }
+          >
             {recent.length === 0 ? (
               <Empty text={t('gradesNoMarks')} />
             ) : (
@@ -247,5 +374,65 @@ export default function GradesPage() {
         )}
       </Card>
     </main>
+  )
+}
+
+/**
+ * Четвертные оценки: структура ответа зависит от потока, поэтому таблица
+ * строится по фактическим ключам первой строки (числа — как оценки).
+ */
+function QuarterlyTable({ grades, t }) {
+  const columns = useMemo(() => {
+    const skip = new Set(['id', 'student_id', 'spec_id'])
+    const cols = []
+    const seen = new Set()
+    for (const g of grades) {
+      for (const k of Object.keys(g)) {
+        if (skip.has(k) || seen.has(k)) continue
+        seen.add(k)
+        cols.push(k)
+      }
+    }
+    return cols
+  }, [grades])
+
+  const humanize = (key) => {
+    const map = {
+      spec_name: t('gradesSubject'),
+      subject_name: t('gradesSubject'),
+      period_name: t('gradesQuarterly'),
+      name: t('gradesSubject'),
+    }
+    return map[key] || key.replace(/_/g, ' ')
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="marks-table">
+        <thead>
+          <tr>
+            {columns.map((c) => (
+              <th key={c}>{humanize(c)}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {grades.map((g, i) => (
+            <tr key={i}>
+              {columns.map((c) => {
+                const val = g[c]
+                const num = Number(val)
+                const isMark = val != null && val !== '' && !Number.isNaN(num) && num >= 1 && num <= 5
+                return (
+                  <td key={c} className={typeof val === 'number' || /^[\d.]+$/.test(String(val ?? '')) ? '' : 'text-xs text-muted'}>
+                    {isMark ? <MarkPill mark={val} /> : String(val ?? '—')}
+                  </td>
+                )
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }

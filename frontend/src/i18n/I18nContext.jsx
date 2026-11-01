@@ -1,13 +1,14 @@
-import React, { createContext, useContext, useMemo } from 'react'
+import React, { createContext, useContext, useEffect, useMemo } from 'react'
 import { translations } from './translations'
-import { setLangProvider } from '../api/client'
+import { setLangProvider, setApiErrorMessageFactory } from '../api/client'
 
 const LANG_HEADER = { ru: 'ru_RU, ru', en: 'en_US, en' }
 
 const I18nContext = createContext(null)
 
 export function I18nProvider({ lang, children }) {
-  useMemo(() => {
+  // Словарь доступен не-React модулям (client.js, useAutoRate)
+  useEffect(() => {
     setLangProvider(() => LANG_HEADER[lang] || 'ru_RU, ru')
   }, [lang])
 
@@ -37,6 +38,15 @@ export function I18nProvider({ lang, children }) {
       return new Intl.DateTimeFormat(locale, { weekday: 'long' }).format(date)
     }
     return { t, lang, locale, fmtDate, fmtShort, fmtWeekday }
+  }, [lang])
+
+  // «Ошибка API (404)» больше не зашита по-русски: текст берётся из словаря
+  useEffect(() => {
+    const dict = translations[lang] || translations.ru
+    setApiErrorMessageFactory((status) => {
+      let s = dict.apiError ?? `API error (${status})`
+      return s.replace('{status}', String(status))
+    })
   }, [lang])
 
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>

@@ -48,7 +48,7 @@ export function ErrorBox({ onRetry, title }) {
   )
 }
 
-export function SearchInput({ value, onChange, placeholder }) {
+export function SearchInput({ value, onChange, placeholder, label }) {
   return (
     <div className="search-box w-full">
       <Search />
@@ -57,6 +57,7 @@ export function SearchInput({ value, onChange, placeholder }) {
         type="search"
         value={value}
         placeholder={placeholder}
+        aria-label={label || placeholder}
         onChange={(e) => onChange(e.target.value)}
       />
     </div>
@@ -65,9 +66,32 @@ export function SearchInput({ value, onChange, placeholder }) {
 
 export function Chip({ active, children, onClick }) {
   return (
-    <button type="button" className={`chip ${active ? 'is-active' : ''}`} onClick={onClick}>
+    <button type="button" className={`chip ${active ? 'is-active' : ''}`} aria-pressed={active} onClick={onClick}>
       {children}
     </button>
+  )
+}
+
+/** Прямоугольный скелетон под строки/страницы */
+export function Skeleton({ w = '100%', h = 14, r = 8, style }) {
+  return <span className="skeleton" style={{ width: w, height: h, borderRadius: r, ...style }} />
+}
+
+/** Скелетон вместо спиннера внутри карточки — без «прыжков» вёрстки */
+export function CardSkeleton({ rows = 3, withTitle = false }) {
+  return (
+    <div className="flex flex-col gap-2.5" aria-hidden="true">
+      {withTitle && <Skeleton w="40%" h={16} />}
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="lesson-row" style={{ alignItems: 'center' }}>
+          <Skeleton w={34} h={34} r={10} />
+          <div className="flex-1 flex flex-col gap-1.5">
+            <Skeleton w={`${70 - i * 12}%`} h={12} />
+            <Skeleton w={`${45 - i * 8}%`} h={10} />
+          </div>
+        </div>
+      ))}
+    </div>
   )
 }
 

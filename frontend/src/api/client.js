@@ -25,11 +25,17 @@ export class ApiError extends Error {
   }
 }
 
+// Фабрика текста ошибки по умолчанию; переопределяется словарём i18n
+// (см. I18nContext → setApiErrorMessageFactory), чтобы текст «Ошибка API (404)»
+// не был зашит по-русски
+let apiErrorMessageFactory = (status) => `API error (${status})`
+export function setApiErrorMessageFactory(fn) { apiErrorMessageFactory = fn }
+
 function extractMessage(payload, status) {
   if (Array.isArray(payload) && payload[0]?.message) return payload[0].message
   if (payload?.message) return payload.message
   if (typeof payload === 'string' && payload && payload.length < 200) return payload
-  return `Ошибка API (${status})`
+  return apiErrorMessageFactory(status)
 }
 
 // ── Базовый запрос ───────────────────────────────────────────────────────────

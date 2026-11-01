@@ -51,6 +51,27 @@ export function daysUntil(isoDate) {
 /** «Скоро сдавать» — осталось не больше этого числа дней */
 export const DUE_SOON_DAYS = 3
 
+/** «ЧЧ:ММ» → минуты от начала суток (или null) */
+export function minutesOfDay(hhmm) {
+  const [h, m] = String(hhmm || '').split(':').map(Number)
+  if (Number.isNaN(h)) return null
+  return h * 60 + (Number.isNaN(m) ? 0 : m)
+}
+
+/** Текущие минуты от начала суток */
+export function nowMinutes() {
+  const d = new Date()
+  return d.getHours() * 60 + d.getMinutes()
+}
+
+/** Дата «YYYY-MM-DD» → «DD.MM.YYYY» (для экспорта CSV) */
+export function fmtShortDate(isoDate) {
+  if (!isoDate) return ''
+  const [y, m, d] = String(isoDate).slice(0, 10).split('-')
+  if (!y || !m || !d) return String(isoDate)
+  return `${d}.${m}.${y}`
+}
+
 /**
  * Итоговый статус ДЗ/ЛР с учётом дедлайна:
  * overdue → dueSoon → current → checking → checked
@@ -78,20 +99,8 @@ export function money(value, locale = 'ru-RU') {
   return new Intl.NumberFormat(locale, { style: 'currency', currency: 'RUB', maximumFractionDigits: 0 }).format(n)
 }
 
-/** Статус ДЗ/ЛР для отображения */
-export function hwItemStatus(item) {
-  const today = todayISO()
-  if (item.homework_stud) {
-    if (item.homework_stud.mark !== null && item.homework_stud.mark !== undefined) {
-      return { key: 'checked' }
-    }
-    return { key: 'checking' }
-  }
-  if (item.overdue_time && item.overdue_time < today) return { key: 'overdue' }
-  return { key: 'current' }
-}
-
-export const HW_STATUS_KEYS = ['current', 'checking', 'checked', 'overdue']
+// Мёртвый код удалён: hwItemStatus / HW_STATUS_KEYS нигде не использовались —
+// итоговый статус всегда считает hwBucket()
 
 // Серверный status-параметр для каждого статуса
 export const HW_STATUS_PARAM = { overdue: 0, checked: 1, checking: 2, current: 3 }
@@ -102,4 +111,17 @@ export function uniq(list) {
 
 export function normalize(s) {
   return String(s ?? '').toLowerCase()
+}
+
+/**
+ * «EVALUATION_LESSON_MARK» → «Evaluation Lesson Mark» —
+ * человекочитаемый запасной вариант, когда перевода для кода награды нет
+ */
+export function prettyKey(key) {
+  return String(key || '')
+    .toLowerCase()
+    .split('_')
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ')
 }

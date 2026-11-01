@@ -2,11 +2,12 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 import { SETTINGS_KEY } from '../api/constants'
 
 const DEFAULTS = {
-  theme: 'system', // 'light' | 'dark' | 'system'
-  lang: 'ru',      // 'ru' | 'en'
-  autoRate: false, // автооценка занятий
-  autoRateMark: 5, // какая оценка ставится (2..5)
-  hiddenNav: [],   // id пунктов сайдбара, скрытых пользователем
+  theme: 'system',    // 'light' | 'dark' | 'system'
+  lang: 'ru',         // 'ru' | 'en'
+  autoRateMode: 'off', // 'off' | 'auto' | 'confirm'
+  autoRateMark: 5,     // какая оценка ставится (только 4–5 для авто)
+  deadlineNotify: false, // Web Notifications о дедлайнах
+  hiddenNav: [],       // id пунктов сайдбара, скрытых пользователем
 }
 
 const SettingsContext = createContext(null)
@@ -22,7 +23,13 @@ function applyTheme(theme) {
 export function SettingsProvider({ children }) {
   const [settings, setSettings] = useState(() => {
     try {
-      return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') }
+      const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}')
+      // миграция: старый boolean autoRate → autoRateMode
+      if (typeof saved.autoRate === 'boolean') {
+        saved.autoRateMode = saved.autoRate ? 'auto' : 'off'
+        delete saved.autoRate
+      }
+      return { ...DEFAULTS, ...saved }
     } catch {
       return { ...DEFAULTS }
     }
@@ -58,8 +65,9 @@ export function SettingsProvider({ children }) {
       hiddenNav,
       setTheme: (theme) => update({ theme }),
       setLang: (lang) => update({ lang }),
-      setAutoRate: (autoRate) => update({ autoRate }),
+      setAutoRateMode: (autoRateMode) => update({ autoRateMode }),
       setAutoRateMark: (autoRateMark) => update({ autoRateMark }),
+      setDeadlineNotify: (deadlineNotify) => update({ deadlineNotify }),
       // Показать/скрыть пункт меню сайдбара
       toggleNav: (id) =>
         setSettings((s) => {
