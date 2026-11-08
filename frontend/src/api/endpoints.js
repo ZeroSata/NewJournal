@@ -33,7 +33,7 @@ export const apiLeaderGroup = () => request('/dashboard/progress/leader-group')
 
 export const apiLeaderGroupPoints = () => request('/dashboard/progress/leader-group-points')
 
-// Рейтинг потока (был в каталоге, но не использовался)
+// Рейтинг потока — карточка «Лидеры потока» на главной
 export const apiLeaderStream = () => request('/dashboard/progress/leader-stream')
 
 export const apiLeaderStreamPoints = () => request('/dashboard/progress/leader-stream-points')

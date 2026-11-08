@@ -292,17 +292,18 @@ export default function DashboardPage() {
                 const key = `ach.${a.achievements_name}`
                 const raw = t(key)
                 const label = raw === key ? prettyKey(a.achievements_name) : raw
-                const isCoin = a.point_types_name === 'COIN'
+                // COIN = «Топгемы», DIAMOND = «Топкоины» — словарь локализации оригинала
+                const isGems = a.point_types_name === 'COIN'
                 return (
                   <div key={i} className="flex items-center gap-3 py-1">
                     <span
                       className="inline-flex items-center justify-center rounded-lg shrink-0"
-                      style={{ width: 30, height: 30, background: isCoin ? 'var(--warning-soft)' : 'var(--accent-soft)' }}
-                      title={isCoin ? t('achTopcoins') : t('achTopgems')}
+                      style={{ width: 30, height: 30, background: isGems ? 'var(--warning-soft)' : 'var(--accent-soft)' }}
+                      title={isGems ? t('achTopgems') : t('achTopcoins')}
                     >
-                      {isCoin
-                        ? <Coins size={16} style={{ color: 'var(--warning)' }} />
-                        : <Gem size={16} style={{ color: 'var(--accent)' }} />}
+                      {isGems
+                        ? <Gem size={16} style={{ color: 'var(--warning)' }} />
+                        : <Coins size={16} style={{ color: 'var(--accent)' }} />}
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="text-sm font-medium truncate">{label}</div>

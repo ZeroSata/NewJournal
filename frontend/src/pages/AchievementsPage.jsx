@@ -15,8 +15,9 @@ export default function AchievementsPage() {
 
   const gaming = useMemo(() => {
     const arr = Array.isArray(user?.gaming_points) ? user.gaming_points : []
-    const gems = arr.find((g) => g.new_gaming_point_types__id === 1)?.points ?? null
-    const coins = arr.find((g) => g.new_gaming_point_types__id === 2)?.points ?? null
+    // COIN (id 2) = «Топгемы», DIAMOND (id 1) = «Топкоины» — словарь оригинала
+    const gems = arr.find((g) => g.new_gaming_point_types__id === 2)?.points ?? null
+    const coins = arr.find((g) => g.new_gaming_point_types__id === 1)?.points ?? null
     return { gems, coins }
   }, [user])
 

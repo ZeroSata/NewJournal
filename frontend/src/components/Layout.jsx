@@ -174,16 +174,17 @@ function BottomNav() {
 
 /**
  * Кошелёк в топбаре: Топгемы и Топкоины (как на оригинальном сайте).
- * Балансы приходят из /settings/user-info → user.gaming_points:
- * new_gaming_point_types__id 1 = гемы, 2 = коины.
+ * Балансы приходят из /settings/user-info → user.gaming_points.
+ * Соответствие типов — по словарю локализации оригинала (/public/translations):
+ * COIN (id 2) = «Топгемы», DIAMOND (id 1) = «Топкоины».
  */
 function WalletChips() {
   const { user } = useAuth()
   const { t, locale } = useI18n()
 
   const arr = Array.isArray(user?.gaming_points) ? user.gaming_points : []
-  const gems = arr.find((g) => g.new_gaming_point_types__id === 1)?.points ?? null
-  const coins = arr.find((g) => g.new_gaming_point_types__id === 2)?.points ?? null
+  const gems = arr.find((g) => g.new_gaming_point_types__id === 2)?.points ?? null
+  const coins = arr.find((g) => g.new_gaming_point_types__id === 1)?.points ?? null
   if (gems == null && coins == null) return null
 
   const fmt = (n) => new Intl.NumberFormat(locale).format(n)
