@@ -212,88 +212,15 @@ input, select, button, textarea { font: inherit; color: inherit; }
 
 .page__subtitle { color: var(--text-muted); margin: 0 0 20px; }
 
-/* ─── Мобильная адаптация (v1.2) ─────────────────────────────────────────
-   Сайдбар на мобильных скрыт — навигация переехала в нижнюю панель,
-   поэтому гамбургер больше не нужен. */
-@media (max-width: 920px) {
-  .sidebar { display: none; }
-  .page { padding: 14px 12px calc(80px + env(safe-area-inset-bottom)); }
-  .topbar { height: 54px; padding: 0 14px; }
-  .page__title { font-size: 20px; }
-  .toast {
-    bottom: calc(76px + env(safe-area-inset-bottom));
-    right: 12px;
-    left: 12px;
-    max-width: none;
-  }
-}
+/* Гамбургер в топбаре — только на мобильных, на десктопе сайдбар всегда виден.
+   .icon-btn в селекторе — чтобы перебить display у общего класса кнопки */
+.icon-btn.topbar__burger { display: none; }
 
-/* Нижняя навигация — только на мобильных */
-.bottom-nav { display: none; }
-@media (max-width: 920px) {
-  .bottom-nav {
-    position: fixed;
-    left: 0; right: 0; bottom: 0;
-    z-index: 45;
-    display: flex;
-    gap: 2px;
-    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
-    background: var(--topbar-bg);
-    border-top: 1px solid var(--border);
-    overflow-x: auto;
-    scrollbar-width: none;
-    -webkit-overflow-scrolling: touch;
-  }
-  .bottom-nav::-webkit-scrollbar { display: none; }
-}
-.bottom-nav__item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  min-width: 62px;
-  flex: 0 0 auto;
-  padding: 5px 8px;
-  border-radius: 10px;
-  color: var(--text-muted);
-  text-decoration: none;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-.bottom-nav__item:hover { text-decoration: none; color: var(--text); }
-.bottom-nav__item.is-active { color: var(--accent); background: var(--accent-soft); }
-.bottom-nav__icon { position: relative; display: inline-flex; }
-.bottom-nav__icon svg { width: 20px; height: 20px; }
-.bottom-nav__label { font-size: 10px; font-weight: 600; white-space: nowrap; }
-.bottom-nav__badge {
-  position: absolute;
-  top: -5px; right: -9px;
-  min-width: 16px; height: 16px;
-  padding: 0 4px;
-  border-radius: 999px;
-  background: var(--accent);
-  color: #fff;
-  font-size: 10px;
-  font-weight: 700;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.bottom-nav__dot {
-  position: absolute;
-  top: -3px; right: -7px;
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  background: var(--warning);
-  animation: due-pulse 2s ease infinite;
-}
+/* Крестик в шапке сайдбара — только в выдвижном режиме */
+.icon-btn.sidebar__close { display: none; margin-left: auto; }
 
-/* Малые экраны */
-@media (max-width: 560px) {
-  .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-  .stat-card__value { font-size: 22px; }
-  .lesson-row { gap: 10px; padding: 10px 12px; }
-  .card { padding: 14px; }
-}
+/* Блокировка прокрутки страницы под открытым меню */
+body.menu-lock { overflow: hidden; }
 
 /* ─── Модальные окна ─────────────────────────────────────────────────────── */
 .modal-card {
@@ -699,3 +626,165 @@ select.field { cursor: pointer; }
   from { transform: translateY(12px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
 }
+
+/* ─── ДЗ и ЛР: карточки работ как на оригинальном сайте ────────────────────── */
+.hw-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr));
+  gap: 12px;
+  align-items: stretch;
+}
+.hw-card {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+.hw-card__cover {
+  position: relative;
+  aspect-ratio: 16 / 7;
+  background: var(--accent-soft);
+  flex-shrink: 0;
+}
+.hw-card__cover img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.hw-card__cover-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.75;
+}
+.hw-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px 14px;
+  flex: 1;
+  min-width: 0;
+}
+.hw-attach {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--bg);
+  text-decoration: none;
+}
+.hw-attach:hover { border-color: var(--accent); color: var(--accent); }
+.hw-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 6px 10px;
+  min-width: 0;
+}
+.hw-note--teacher {
+  background: var(--accent-soft);
+  border-color: var(--accent-soft);
+  color: var(--text);
+}
+.hw-note__text {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+/* ─── Мобильная адаптация (v1.4) ─────────────────────────────────────────
+   Блок намеренно стоит в КОНЦЕ файла: он должен побеждать базовые правила
+   по порядку каскада (в v1.2 медиазапросы стояли раньше базовых стилей и
+   не работали — из-за этого элементы не подгонялись под телефон).
+   Нижней панели навигации больше нет: меню открывается кнопкой-гамбургером
+   (3 полоски) в топбаре, сайдбар выезжает слева поверх контента. */
+@media (max-width: 920px) {
+  /* Сайдбар — выдвижная панель поверх контента */
+  .sidebar {
+    position: fixed;
+    top: 0; bottom: 0; left: 0;
+    width: min(84vw, 320px);
+    z-index: 60;
+    height: 100dvh;
+    height: 100vh;
+    border-right: 1px solid var(--border);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+    transform: translateX(-105%);
+    transition: transform 0.25s ease;
+    padding-bottom: env(safe-area-inset-bottom);
+    visibility: hidden;
+  }
+  .sidebar.is-open {
+    transform: translateX(0);
+    visibility: visible;
+  }
+  .sidebar__nav { overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+  .sidebar__close { display: inline-flex; }
+  .icon-btn.sidebar__close { display: inline-flex; }
+
+  /* Затемнение под меню */
+  .sidebar-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    background: rgba(9, 14, 20, 0.5);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+  }
+  .sidebar-overlay.is-open { opacity: 1; pointer-events: auto; }
+
+  .topbar__burger { display: inline-flex; }
+  .icon-btn.topbar__burger { display: inline-flex; }
+  .topbar { height: 54px; padding: 0 12px; gap: 10px; }
+  .page { padding: 14px 12px 28px; }
+  .page__title { font-size: 20px; }
+  .page__subtitle { font-size: 14px; margin-bottom: 14px; }
+  .toast {
+    bottom: 16px;
+    right: 12px;
+    left: 12px;
+    max-width: none;
+  }
+}
+
+/* Малые экраны */
+@media (max-width: 560px) {
+  .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .stat-card__value { font-size: 22px; }
+  .lesson-row { gap: 10px; padding: 10px 12px; }
+  .card { padding: 14px; }
+  .card__title { font-size: 15px; }
+  /* Календарь расписания: клетки уже, чтобы месяц влезал без горизонтальной прокрутки */
+  .cal-cell { min-height: 54px; padding: 4px; }
+  .topbar { padding: 0 10px; }
+  .tag { font-size: 11px; }
+}
+
+/* Очень узкие экраны (320–380px): экономим каждый пиксель */
+@media (max-width: 380px) {
+  .page { padding: 12px 10px 24px; }
+  .topbar { padding: 0 8px; gap: 8px; }
+  .stats-grid { gap: 8px; }
+  .btn { padding: 9px 14px; font-size: 14px; }
+  .icon-btn { width: 34px; height: 34px; }
+}
+

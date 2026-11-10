@@ -3,6 +3,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import {
   ClipboardList, FlaskConical, FileDown, ExternalLink, ChevronDown, SearchX,
   UploadCloud, Trash2, FileUp, Clock, Star, X, CloudUpload,
+  CalendarDays, CheckCircle2, FileText, MessageSquare, UserRound,
 } from 'lucide-react'
 import {
   apiHomeworkList, apiSubmitHomework, apiDeleteHomework, apiGroupHistory,
@@ -20,12 +21,33 @@ function useHomeworkInfinite(type, statusParam, groupId, specId) {
     queryFn: ({ pageParam }) =>
       apiHomeworkList({ page: pageParam, status: statusParam, type, groupId, specId }),
     initialPageParam: 1,
-    // надёжная пагинация: не завязана на размер страницы —
-    // идём дальше, пока приходит непустой список
-    getNextPageParam: (last, pages) =>
-      Array.isArray(last) && last.length > 0 ? pages.length + 1 : undefined,
+    // Пагинация с защитой от дублей (поведение сервера проверено живьём):
+    // часть работ сервер повторяет на КАЖДОЙ странице и признака конца
+    // списка не отдаёт. Идём дальше только пока страница принесла хотя бы
+    // одну работу с новым id — иначе список закончился.
+    getNextPageParam: (last, allPages) => {
+      const list = Array.isArray(last) ? last : []
+      if (!list.length) return undefined
+      const seen = new Set()
+      for (const p of allPages.slice(0, -1)) {
+        for (const it of Array.isArray(p) ? p : []) seen.add(it.id)
+      }
+      return list.some((it) => !seen.has(it.id)) ? allPages.length + 1 : undefined
+    },
     staleTime: 2 * 60 * 1000,
   })
+}
+
+/** Склейка страниц без дублей: одни и те же работы приходят на разных страницах */
+function dedupePages(data) {
+  const out = []
+  const seen = new Set()
+  for (const it of (data?.pages || []).flat()) {
+    if (it?.id == null || seen.has(it.id)) continue
+    seen.add(it.id)
+    out.push(it)
+  }
+  return out
 }
 
 const BUCKET_META = {
@@ -78,6 +100,10 @@ export default function HomeworkPage() {
   const hwQuery = useHomeworkInfinite(0, statusParam, groupId, specId)
   const labQuery = useHomeworkInfinite(1, statusParam, groupId, specId)
 
+  // Страницы, склеенные без дублей (сервер повторяет работы между страницами)
+  const hwItems = useMemo(() => dedupePages(hwQuery.data), [hwQuery.data])
+  const labItems = useMemo(() => dedupePages(labQuery.data), [labQuery.data])
+
   // Предметы, найденные только в загруженных работах (в справочнике их нет)
   const extraSubjects = useMemo(() => {
     const seen = new Set(subjects.map((s) => s.name))
@@ -89,10 +115,10 @@ export default function HomeworkPage() {
           out.push({ id: null, name: it.name_spec })
         }
       })
-    push(hwQuery.data?.pages?.flat())
-    push(labQuery.data?.pages?.flat())
+    push(hwItems)
+    push(labItems)
     return out
-  }, [subjects, hwQuery.data, labQuery.data])
+  }, [subjects, hwItems, labItems])
 
   const allSubjects = useMemo(
     () => [...subjects, ...extraSubjects],
@@ -110,11 +136,16 @@ export default function HomeworkPage() {
 
   const items = useMemo(() => {
     const out = []
+    const seen = new Set() // одна работа не показывается дважды (ДЗ и ЛР-списки)
     const push = (list, type) => {
-      for (const it of Array.isArray(list) ? list : []) out.push({ ...it, workType: type })
+      for (const it of Array.isArray(list) ? list : []) {
+        if (seen.has(it.id)) continue
+        seen.add(it.id)
+        out.push({ ...it, workType: type })
+      }
     }
-    if (typeFilter !== 'lab') push(hwQuery.data?.pages?.flat(), 0)
-    if (typeFilter !== 'hw') push(labQuery.data?.pages?.flat(), 1)
+    if (typeFilter !== 'lab') push(hwItems, 0)
+    if (typeFilter !== 'hw') push(labItems, 1)
 
     const q = normalize(search)
     return out
@@ -129,11 +160,11 @@ export default function HomeworkPage() {
         )
       })
       .map((it) => ({ ...it, bucket: hwBucket(it) }))
-  }, [hwQuery.data, labQuery.data, typeFilter, search, subject])
+  }, [hwItems, labItems, typeFilter, search, subject])
 
   const totalLoaded =
-    (typeFilter !== 'lab' ? (hwQuery.data?.pages?.flat().length || 0) : 0) +
-    (typeFilter !== 'hw' ? (labQuery.data?.pages?.flat().length || 0) : 0)
+    (typeFilter !== 'lab' ? hwItems.length : 0) +
+    (typeFilter !== 'hw' ? labItems.length : 0)
 
   const loading = hwQuery.isLoading || labQuery.isLoading
   const error = hwQuery.isError || labQuery.isError
@@ -271,7 +302,7 @@ export default function HomeworkPage() {
                   <span className="text-xs text-muted">{sec.list.length}</span>
                   <div className="flex-1" style={{ borderTop: '1px solid var(--border)' }} />
                 </div>
-                <div className="flex flex-col gap-2">
+                <div className="hw-grid">
                   {sec.list.map((it) => (
                     <HwCard key={`${it.workType}-${it.id}`} it={it} t={t} fmtShort={fmtShort} />
                   ))}
@@ -279,7 +310,7 @@ export default function HomeworkPage() {
               </div>
             ))
           ) : (
-            <div className="flex flex-col gap-2">
+            <div className="hw-grid">
               {sorted.map((it) => (
                 <HwCard key={`${it.workType}-${it.id}`} it={it} t={t} fmtShort={fmtShort} />
               ))}
@@ -303,7 +334,11 @@ export default function HomeworkPage() {
   )
 }
 
-/** Карточка одного задания */
+/**
+ * Карточка одной работы — как на оригинальном сайте:
+ * обложка задания, предмет, тема, преподаватель, сроки, файлы,
+ * текст ответа, комментарии преподавателя, статус и оценка.
+ */
 function HwCard({ it, t, fmtShort }) {
   const queryClient = useQueryClient()
   const [submitOpen, setSubmitOpen] = useState(false)
@@ -311,9 +346,10 @@ function HwCard({ it, t, fmtShort }) {
   const [msg, setMsg] = useState(null)
 
   const isLab = it.workType === 1
-  const mark = it.homework_stud?.mark
-  const canSubmit = !it.homework_stud
-  const canDelete = Boolean(it.homework_stud) && mark == null
+  const hs = it.homework_stud
+  const mark = hs?.mark
+  const canSubmit = !hs
+  const canDelete = Boolean(hs) && mark == null
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['hw-list'] })
@@ -325,7 +361,7 @@ function HwCard({ it, t, fmtShort }) {
   const deleteMutation = useMutation({
     // ВАЖНО: сервер ждёт id СДАННОЙ работы (homework_stud.id), а не задания —
     // с id задания отвечает 422 (проверено живьём)
-    mutationFn: () => apiDeleteHomework(it.homework_stud?.id ?? it.id),
+    mutationFn: () => apiDeleteHomework(hs?.id ?? it.id),
     onSuccess: () => {
       setConfirmDelete(false)
       setMsg({ ok: true, text: t('hwDeleteOk') })
@@ -343,52 +379,124 @@ function HwCard({ it, t, fmtShort }) {
         ? left === 0 ? t('hwDueToday') : t('hwDaysLeft', { n: left })
         : null
 
+  const teacherComment = String(it.homework_comment || '').trim()
+  const taskComment = String(it.comment || '').trim()
+  const myAnswer = String(hs?.stud_answer || '').trim()
+
   return (
-    <div className="lesson-row !items-start" style={it.bucket === 'overdue' ? { borderColor: 'var(--danger-soft)', background: 'var(--danger-soft)' } : undefined}>
-      <div
-        className="lesson-row__num"
-        title={isLab ? t('hwTagLab') : t('hwTagHw')}
-        style={isLab ? { background: 'var(--accent-soft)', color: 'var(--accent)' } : { background: 'var(--info-soft)', color: 'var(--info)' }}
-      >
-        {isLab ? <FlaskConical size={16} /> : <ClipboardList size={16} />}
+    <div
+      className="card hw-card"
+      style={it.bucket === 'overdue' ? { borderColor: 'var(--danger-soft)' } : undefined}
+    >
+      {/* Обложка работы (как на оригинале) с запасным фоном под иконку типа */}
+      <div className="hw-card__cover">
+        {it.cover_image ? (
+          <img src={it.cover_image} alt="" loading="lazy" referrerPolicy="no-referrer" />
+        ) : (
+          <div className="hw-card__cover-fallback" style={{ color: isLab ? 'var(--accent)' : 'var(--info)' }}>
+            {isLab ? <FlaskConical size={30} /> : <ClipboardList size={30} />}
+          </div>
+        )}
       </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2 mb-0.5">
+
+      <div className="hw-card__body">
+        <div className="flex flex-wrap items-center gap-1.5">
           <Tag kind={isLab ? 'lab' : 'hw'}>{isLab ? t('hwTagLab') : t('hwTagHw')}</Tag>
-          <span className="font-semibold text-sm">{it.theme}</span>
-        </div>
-        <div className="text-xs text-muted mb-1.5">
-          {it.name_spec} · {it.fio_teach}
-        </div>
-        <div className="flex flex-wrap items-center gap-2 text-xs">
           <Tag kind={meta.tag}>{t(meta.sectionKey)}</Tag>
-          {deadlineInfo && (
-            <span className="inline-flex items-center gap-1" style={{ color: it.bucket === 'overdue' ? 'var(--danger)' : 'var(--warning)', fontWeight: 600 }}>
-              <Clock size={12} /> {deadlineInfo}
-            </span>
-          )}
           {mark != null && (
-            <span className="inline-flex items-center gap-1">
+            <span className="inline-flex items-center gap-1 text-xs">
               {t('hwMark')}: <MarkPill mark={mark} />
-              {it.homework_stud?.auto_mark && <span className="text-muted">({t('hwAutoMark')})</span>}
+              {hs?.auto_mark && <span className="text-muted">({t('hwAutoMark')})</span>}
             </span>
-          )}
-          {it.creation_time && (
-            <span className="text-muted">{t('hwIssued')}: {fmtShort(it.creation_time)}</span>
-          )}
-          {it.overdue_time && (
-            <span className="text-muted">{t('hwDeadline')}: {fmtShort(it.overdue_time)}</span>
           )}
         </div>
 
+        <div className="text-xs text-muted truncate">{it.name_spec}</div>
+        <div className="font-semibold text-[15px] leading-snug">{it.theme}</div>
+
+        <div className="flex items-center gap-1.5 text-xs text-muted truncate">
+          <UserRound size={13} className="shrink-0" />
+          <span className="truncate">{it.fio_teach}</span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+          {it.creation_time && (
+            <span className="text-muted inline-flex items-center gap-1">
+              <CalendarDays size={12} /> {t('hwIssued')}: {fmtShort(it.creation_time)}
+            </span>
+          )}
+          {it.overdue_time && (
+            <span
+              className="inline-flex items-center gap-1"
+              style={{ color: it.bucket === 'overdue' ? 'var(--danger)' : it.bucket === 'dueSoon' ? 'var(--warning)' : 'var(--text-muted)', fontWeight: 600 }}
+            >
+              <Clock size={12} /> {t('hwDeadline')}: {fmtShort(it.overdue_time)}
+              {deadlineInfo && <span className="font-normal">· {deadlineInfo}</span>}
+            </span>
+          )}
+          {hs && (
+            <span className="text-muted inline-flex items-center gap-1">
+              <CheckCircle2 size={12} /> {t('hwSentAt')}: {fmtShort(hs.creation_time)}
+            </span>
+          )}
+        </div>
+
+        {(it.file_path || hs?.file_path) && (
+          <div className="flex flex-wrap gap-1.5">
+            {it.file_path && (
+              <a
+                className="hw-attach"
+                href={it.file_path}
+                target="_blank"
+                rel="noreferrer"
+                title={it.filename || t('hwAttachTask')}
+              >
+                <FileText size={13} className="shrink-0" />
+                <span className="truncate" style={{ maxWidth: 200 }}>{it.filename || t('hwAttachTask')}</span>
+                <FileDown size={13} className="shrink-0" />
+              </a>
+            )}
+            {hs?.file_path && (
+              <a
+                className="hw-attach"
+                href={hs.file_path}
+                target="_blank"
+                rel="noreferrer"
+                title={hs.filename || t('hwAttachMy')}
+              >
+                <FileUp size={13} className="shrink-0" />
+                <span className="truncate" style={{ maxWidth: 200 }}>{hs.filename || t('hwAttachMy')}</span>
+                <ExternalLink size={13} className="shrink-0" />
+              </a>
+            )}
+          </div>
+        )}
+
+        {myAnswer && (
+          <div className="hw-note" title={myAnswer}>
+            <span className="hw-note__text"><b>{t('hwMyAnswer')}:</b> {myAnswer}</span>
+          </div>
+        )}
+        {taskComment && (
+          <div className="hw-note" title={taskComment}>
+            <span className="hw-note__text"><b>{t('hwTaskComment')}:</b> {taskComment}</span>
+          </div>
+        )}
+        {teacherComment && (
+          <div className="hw-note hw-note--teacher" title={teacherComment}>
+            <MessageSquare size={13} className="shrink-0" style={{ color: 'var(--accent)', marginTop: 2 }} />
+            <span className="hw-note__text"><b>{t('hwTeacherComment')}:</b> {teacherComment}</span>
+          </div>
+        )}
+
         {msg && (
-          <div className={`error-box mt-2 !text-xs`} style={msg.ok ? { background: 'var(--success-soft)', color: 'var(--success)' } : undefined}>
+          <div className={`error-box mt-1 !text-xs`} style={msg.ok ? { background: 'var(--success-soft)', color: 'var(--success)' } : undefined}>
             {msg.text}
           </div>
         )}
 
         {confirmDelete && (
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs" style={{ background: 'var(--danger-soft)', borderRadius: 10, padding: '8px 12px' }}>
+          <div className="flex flex-wrap items-center gap-2 text-xs" style={{ background: 'var(--danger-soft)', borderRadius: 10, padding: '8px 12px' }}>
             <span style={{ color: 'var(--danger)', fontWeight: 600 }}>{t('hwDeleteConfirm')}</span>
             <button className="btn btn--primary !py-1.5 !px-3 text-xs" disabled={deleteMutation.isPending} onClick={() => deleteMutation.mutate()}>
               {deleteMutation.isPending ? t('hwSending') : t('hwDelete')}
@@ -398,29 +506,22 @@ function HwCard({ it, t, fmtShort }) {
             </button>
           </div>
         )}
-      </div>
 
-      <div className="flex flex-col gap-1.5 shrink-0">
-        {it.file_path && (
-          <a className="icon-btn" href={it.file_path} target="_blank" rel="noreferrer" title={t('download')} aria-label={`${t('download')}: ${it.theme}`}>
-            <FileDown size={16} />
-          </a>
-        )}
-        {it.homework_stud?.file_path && (
-          <a className="icon-btn" href={it.homework_stud.file_path} target="_blank" rel="noreferrer" title={t('open')} aria-label={t('open')}>
-            <ExternalLink size={16} />
-          </a>
-        )}
-        {canSubmit && (
-          <button className="btn btn--primary !py-2 !px-3 text-xs" onClick={() => setSubmitOpen(true)} title={t('hwSubmit')}>
-            <UploadCloud size={14} />
-            {t('hwSubmit')}
-          </button>
-        )}
-        {canDelete && (
-          <button className="icon-btn" onClick={() => setConfirmDelete(true)} title={t('hwDelete')} aria-label={t('hwDelete')}>
-            <Trash2 size={15} />
-          </button>
+        {(canSubmit || canDelete) && (
+          <div className="flex items-center gap-2 mt-auto pt-2">
+            {canSubmit && (
+              <button className="btn btn--primary !py-2 !px-3 text-xs" onClick={() => setSubmitOpen(true)} title={t('hwSubmit')}>
+                <UploadCloud size={14} />
+                {t('hwSubmit')}
+              </button>
+            )}
+            {canDelete && (
+              <button className="btn btn--ghost !py-2 !px-3 text-xs" onClick={() => setConfirmDelete(true)} title={t('hwDelete')}>
+                <Trash2 size={14} />
+                {t('hwDelete')}
+              </button>
+            )}
+          </div>
         )}
       </div>
 

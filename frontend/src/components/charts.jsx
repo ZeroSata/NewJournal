@@ -1,4 +1,5 @@
-import React from 'react'
+import * as React from 'react'
+const { useState, useEffect } = React
 // Модульный ECharts: вместо импорта всего пакета подключаем только нужное —
 // бандл уменьшается в разы (см. анализ: раньше echarts входил целиком)
 import * as echarts from 'echarts/core'
@@ -40,6 +41,20 @@ function palette() {
     warning: v('--warning'),
     danger: v('--danger'),
   }
+}
+
+/** Реагируем на переход через мобильный брейкпоинт, чтобы графики пересчитали подписи */
+function useNarrow(px = 600) {
+  const [narrow, setNarrow] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia(`(max-width: ${px}px)`).matches : false
+  )
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${px}px)`)
+    const onChange = (e) => setNarrow(e.matches)
+    mq.addEventListener?.('change', onChange)
+    return () => mq.removeEventListener?.('change', onChange)
+  }, [px])
+  return narrow
 }
 
 /**
@@ -252,6 +267,7 @@ export function AttendanceTrendChart({ data }) {
 /** Горизонтальные бары: средний балл по предметам */
 export function SubjectAverageChart({ data }) {
   const p = palette()
+  const narrow = useNarrow()
   return (
     <Chart
       height={Math.max(240, data.length * 34 + 70)}
@@ -271,7 +287,8 @@ export function SubjectAverageChart({ data }) {
         yAxis: {
           type: 'category',
           data: data.map((d) => d.label),
-          axisLabel: { color: p.text, width: 210, overflow: 'truncate' },
+          // на телефоне подпись уже, чтобы оставалось место самим барам
+          axisLabel: { color: p.text, width: narrow ? 120 : 210, overflow: 'truncate' },
           axisLine: { lineStyle: { color: p.border } },
         },
         series: [

@@ -71,7 +71,7 @@ export default function AchievementsPage() {
       ) : (
         <div
           className="grid gap-3"
-          style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))' }}
+          style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 240px), 1fr))' }}
         >
           {list.map((a) => (
             <div

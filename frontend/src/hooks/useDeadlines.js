@@ -12,7 +12,13 @@ export function fetchDeadlineItems(groupId) {
   return Promise.all([
     load(0, 1), load(0, 2), load(1, 1), load(1, 2),
   ]).then((pages) => {
-    const items = pages.flat().filter(Boolean)
+    // Сервер повторяет часть работ на каждой странице — склеиваем без дублей
+    const seen = new Set()
+    const items = pages.flat().filter((it) => {
+      if (!it || seen.has(it.id)) return false
+      seen.add(it.id)
+      return true
+    })
     const dueToday = []
     const dueTomorrow = []
     for (const it of items) {

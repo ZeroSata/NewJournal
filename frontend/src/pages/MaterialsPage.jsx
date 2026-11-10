@@ -146,7 +146,7 @@ export default function MaterialsPage() {
       ) : (
         <div
           className="grid gap-3"
-          style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}
+          style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 280px), 1fr))' }}
         >
           {filtered.map((m) => {
             const link = m.url || m.link || null

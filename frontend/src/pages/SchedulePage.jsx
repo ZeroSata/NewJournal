@@ -118,7 +118,7 @@ export default function SchedulePage() {
           <button className="icon-btn" onClick={() => shift(-1)} title={t('schedPrev')} aria-label={t('schedPrev')}>
             <ChevronLeft size={18} />
           </button>
-          <div className="font-semibold text-sm min-w-[220px] text-center capitalize">{periodLabel}</div>
+          <div className="font-semibold text-sm min-w-0 flex-1 text-center capitalize sm:flex-none sm:min-w-[220px]">{periodLabel}</div>
           <button className="icon-btn" onClick={() => shift(1)} title={t('schedNext')} aria-label={t('schedNext')}>
             <ChevronRight size={18} />
           </button>
@@ -214,7 +214,7 @@ function DayView({ date, lessons, today, locale, t }) {
 
 function WeekView({ days, byDate, today, locale, t, openDay }) {
   return (
-    <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))' }}>
+    <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 320px), 1fr))' }}>
       {days.map((date) => {
         const list = byDate[date] || []
         const isToday = date === today
@@ -290,7 +290,7 @@ function MonthView({ monthDate, byDate, today, locale, t, openDay, deadlineByDat
             <button
               key={iso}
               onClick={() => openDay(iso)}
-              className="min-h-[72px] rounded-xl border p-1.5 text-left transition-colors flex flex-col gap-1"
+              className="cal-cell min-h-[72px] rounded-xl border p-1.5 text-left transition-colors flex flex-col gap-1 overflow-hidden"
               style={{
                 borderColor: isToday ? 'var(--accent)' : 'var(--border)',
                 background: isToday ? 'var(--accent-soft)' : inMonth ? 'var(--surface)' : 'transparent',

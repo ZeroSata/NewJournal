@@ -139,6 +139,12 @@ export const translations = {
     hwChangeFilters: 'Попробуйте изменить фильтры или подгрузить ещё',
     hwTagHw: 'ДЗ',
     hwTagLab: 'ЛР',
+    hwAttachTask: 'Файл задания',
+    hwAttachMy: 'Моя работа',
+    hwMyAnswer: 'Мой ответ',
+    hwTaskComment: 'Комментарий к заданию',
+    hwTeacherComment: 'Комментарий преподавателя',
+    hwSentAt: 'Сдано',
 
     // Материалы
     matTitle: 'Учебные материалы',
@@ -614,6 +620,12 @@ export const translations = {
     hwChangeFilters: 'Try changing filters or loading more',
     hwTagHw: 'HW',
     hwTagLab: 'LAB',
+    hwAttachTask: 'Assignment file',
+    hwAttachMy: 'My work',
+    hwMyAnswer: 'My answer',
+    hwTaskComment: 'Task comment',
+    hwTeacherComment: 'Teacher’s comment',
+    hwSentAt: 'Submitted',
 
     matTitle: 'Learning materials',
     matSubtitle: 'Search across all subjects and material types',

@@ -1,7 +1,17 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Settings as SettingsIcon, Sun, Moon, LogOut, GraduationCap, Gem, Coins } from 'lucide-react'
+import {
+  Settings as SettingsIcon,
+  Sun,
+  Moon,
+  LogOut,
+  GraduationCap,
+  Gem,
+  Coins,
+  Menu,
+  X,
+} from 'lucide-react'
 import { useAuth } from '../auth/AuthContext'
 import { useSettings } from '../settings/SettingsContext'
 import { useI18n } from '../i18n/I18nContext'
@@ -15,7 +25,7 @@ import { NOTIFIED_KEY } from '../api/constants'
 
 /**
  * Счётчики для бейджей меню (ДЗ / Материалы / Обращения).
- * Один хук — сайдбар и мобильная нижняя навигация показывают одни и те же цифры.
+ * Один хук — сайдбар (обычный и выдвижной на мобильных) показывает одни и те же цифры.
  * Запросы дедуплицируются React Query, дублирующих обращений к API нет.
  */
 function useNavBadges() {
@@ -73,7 +83,12 @@ function useNavBadges() {
   return { badge, dueToday: deadlines?.dueToday?.length || 0 }
 }
 
-function Sidebar() {
+/**
+ * Сайдбар. На десктопе (≥ 921px) — постоянная колонка слева,
+ * на мобильных — выдвижная панель: класс is-open ставится кнопкой-гамбургером
+ * в топбаре, закрытие — по оверлею, крестику или выбору пункта меню.
+ */
+function Sidebar({ open, onClose }) {
   const { t } = useI18n()
   const { user, logout } = useAuth()
   const { hiddenNav } = useSettings()
@@ -83,6 +98,7 @@ function Sidebar() {
   const items = NAV_ITEMS.filter((it) => !hiddenNav.includes(it.id))
 
   const handleLogout = () => {
+    onClose()
     logout()
     navigate('/login')
   }
@@ -95,6 +111,7 @@ function Sidebar() {
         key={it.id}
         to={it.to}
         end={it.end}
+        onClick={onClose}
         className={({ isActive }) => `sidebar__link ${isActive ? 'is-active' : ''}`}
       >
         <Icon />
@@ -108,67 +125,39 @@ function Sidebar() {
   }
 
   return (
-    <aside className="sidebar">
-      <div className="sidebar__logo">
-        <GraduationCap size={24} style={{ color: 'var(--accent)' }} />
-        Journal
-      </div>
-      <nav className="sidebar__nav">
-        {items.map(renderItem)}
-        {renderItem(SETTINGS_NAV)}
-        {/* Вкладка «Объявления» и рекламные ссылки (MAX, «Классно!» и т.п.) удалены сознательно */}
-      </nav>
-      <div className="sidebar__footer">
-        {user?.photo ? (
-          <img className="sidebar__avatar" src={user.photo} alt="" referrerPolicy="no-referrer" />
-        ) : (
-          <div className="sidebar__avatar" />
-        )}
-        <div className="min-w-0 flex-1">
-          <div className="font-semibold text-sm truncate">{user?.full_name}</div>
-          <div className="text-xs text-muted truncate">{user?.group_name}</div>
+    <>
+      {/* затемнение под выдвижным меню (мобильные) */}
+      <div className={`sidebar-overlay ${open ? 'is-open' : ''}`} onClick={onClose} aria-hidden="true" />
+      <aside className={`sidebar ${open ? 'is-open' : ''}`} aria-hidden={!open}>
+        <div className="sidebar__logo">
+          <GraduationCap size={24} style={{ color: 'var(--accent)' }} />
+          Journal
+          {/* крестик закрытия — только на мобильных, на десктопе скрыт CSS-ом */}
+          <button className="sidebar__close icon-btn" onClick={onClose} aria-label={t('menuClose')}>
+            <X size={16} />
+          </button>
         </div>
-        <button className="icon-btn" title={t('logout')} aria-label={t('logout')} onClick={handleLogout}>
-          <LogOut size={17} />
-        </button>
-      </div>
-    </aside>
-  )
-}
-
-/**
- * Нижняя навигация для мобильных (появляется вместо бургера):
- * все пункты меню в горизонтально прокручиваемой панели снизу.
- */
-function BottomNav() {
-  const { t } = useI18n()
-  const { hiddenNav } = useSettings()
-  const { badge, dueToday } = useNavBadges()
-
-  const items = [...NAV_ITEMS.filter((it) => !hiddenNav.includes(it.id)), SETTINGS_NAV]
-
-  return (
-    <nav className="bottom-nav" aria-label={t('setNavMenu')}>
-      {items.map((it) => {
-        const Icon = typeof it.icon === 'string' ? SettingsIcon : it.icon
-        const b = badge(it.id)
-        return (
-          <NavLink
-            key={it.id}
-            to={it.to}
-            end={it.end}
-            className={({ isActive }) => `bottom-nav__item ${isActive ? 'is-active' : ''}`}
-          >
-            <span className="bottom-nav__icon">
-              <Icon />
-              {b != null && <span className="bottom-nav__badge">{b}</span>}
-              {it.id === 'homework' && dueToday > 0 && <span className="bottom-nav__dot" />}
-            </span>
-            <span className="bottom-nav__label">{t(it.labelKey)}</span>
-          </NavLink>
-        )
-      })}
-    </nav>
+        <nav className="sidebar__nav">
+          {items.map(renderItem)}
+          {renderItem(SETTINGS_NAV)}
+          {/* Вкладка «Объявления» и рекламные ссылки (MAX, «Классно!» и т.п.) удалены сознательно */}
+        </nav>
+        <div className="sidebar__footer">
+          {user?.photo ? (
+            <img className="sidebar__avatar" src={user.photo} alt="" referrerPolicy="no-referrer" />
+          ) : (
+            <div className="sidebar__avatar" />
+          )}
+          <div className="min-w-0 flex-1">
+            <div className="font-semibold text-sm truncate">{user?.full_name}</div>
+            <div className="text-xs text-muted truncate">{user?.group_name}</div>
+          </div>
+          <button className="icon-btn" title={t('logout')} aria-label={t('logout')} onClick={handleLogout}>
+            <LogOut size={17} />
+          </button>
+        </div>
+      </aside>
+    </>
   )
 }
 
@@ -208,9 +197,24 @@ function WalletChips() {
 
 export default function Layout() {
   const [toast, setToast] = useState(null)
+  const [menuOpen, setMenuOpen] = useState(false)
   const { user } = useAuth()
   const { settings, setTheme, resolvedTheme } = useSettings()
   const { t } = useI18n()
+
+  // Блокируем прокрутку страницы под выдвижным меню (только мобильные)
+  useEffect(() => {
+    document.body.classList.toggle('menu-lock', menuOpen)
+    return () => document.body.classList.remove('menu-lock')
+  }, [menuOpen])
+
+  // Закрываем меню клавишей Esc
+  useEffect(() => {
+    if (!menuOpen) return
+    const onKey = (e) => e.key === 'Escape' && setMenuOpen(false)
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [menuOpen])
 
   // onRated стабилен: тост теперь рендерится по ключу перевода
   const onRated = useCallback((n) => {
@@ -241,12 +245,21 @@ export default function Layout() {
 
   return (
     <div className="app-shell">
-      <Sidebar />
+      <Sidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
       <div className="main-area">
-        {/* Топбар без гамбургера и аватарки: аватар — только в сайдбаре/кабинете.
-            Переключатель темы оставлен для быстрого доступа (в настройках он тоже есть). */}
+        {/* Топбар: слева гамбургер (3 полоски, только мобильные) — открывает сайдбар;
+            аватарки и надписи Journal в топбаре нет: название — в сайдбаре,
+            аватар — в сайдбаре/кабинете. Тема — для быстрого доступа. */}
         <header className="topbar">
-          <div className="font-bold italic">Journal</div>
+          <button
+            className="icon-btn topbar__burger"
+            onClick={() => setMenuOpen(true)}
+            title={t('menuOpen')}
+            aria-label={t('menuOpen')}
+            aria-expanded={menuOpen}
+          >
+            <Menu size={20} />
+          </button>
           <div className="flex-1" />
           <WalletChips />
           <button
@@ -259,7 +272,6 @@ export default function Layout() {
           </button>
         </header>
         <Outlet />
-        <BottomNav />
         {toast && (
           <div className="toast" role="status">
             {t(toast.key, toast.vars)}
