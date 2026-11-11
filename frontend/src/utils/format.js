@@ -75,12 +75,16 @@ export function fmtShortDate(isoDate) {
 /**
  * Итоговый статус ДЗ/ЛР с учётом дедлайна:
  * overdue → dueSoon → current → checking → checked
+ *
+ * Автоединица: когда дедлайн прошёл, а работа не сдана, система сама ставит
+ * «1» (auto_mark). Это не «Проверено», а «Просрочено» — показываем в просрочках
+ * с пояснением «Не выполнение сроков сдачи домашнего задания».
  */
 export function hwBucket(item) {
-  if (item.homework_stud) {
-    if (item.homework_stud.mark !== null && item.homework_stud.mark !== undefined) {
-      return 'checked'
-    }
+  const hs = item.homework_stud
+  if (hs) {
+    if (hs.auto_mark && Number(hs.mark) === 1) return 'overdue'
+    if (hs.mark !== null && hs.mark !== undefined) return 'checked'
     return 'checking'
   }
   const left = daysUntil(item.overdue_time)
@@ -89,8 +93,8 @@ export function hwBucket(item) {
   return 'current'
 }
 
-/** Порядок секций на странице ДЗ: просрочки → скоро сдавать → текущие → на проверке → проверено */
-export const HW_BUCKETS = ['overdue', 'dueSoon', 'current', 'checking', 'checked']
+/** Порядок секций на странице ДЗ: просрочки → скоро сдавать → текущие → на проверке → проверено → удалённые */
+export const HW_BUCKETS = ['overdue', 'dueSoon', 'current', 'checking', 'checked', 'deleted']
 
 /** Формат суммы в рублях */
 export function money(value, locale = 'ru-RU') {
@@ -102,8 +106,11 @@ export function money(value, locale = 'ru-RU') {
 // Мёртвый код удалён: hwItemStatus / HW_STATUS_KEYS нигде не использовались —
 // итоговый статус всегда считает hwBucket()
 
-// Серверный status-параметр для каждого статуса
-export const HW_STATUS_PARAM = { overdue: 0, checked: 1, checking: 2, current: 3 }
+// Серверный status-параметр для каждого статуса.
+// 4 = «Все» (сервер и так отдаёт его без параметра), 5 = «Удалённые ДЗ» —
+// работы, чью сдачу удалил преподаватель, чтобы студент сделал их заново
+// (в бандле оригинала: HOMEWORK_STATUS_ALL=4, HOMEWORK_STATUS_DELETED=5)
+export const HW_STATUS_PARAM = { overdue: 0, checked: 1, checking: 2, current: 3, deleted: 5 }
 
 export function uniq(list) {
   return [...new Set(list.filter(Boolean))]

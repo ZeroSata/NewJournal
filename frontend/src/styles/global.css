@@ -359,6 +359,7 @@ body.menu-lock { overflow: hidden; }
 .tag--checking { background: var(--warning-soft); color: var(--warning); }
 .tag--checked { background: var(--success-soft); color: var(--success); }
 .tag--overdue { background: var(--danger-soft); color: var(--danger); }
+.tag--deleted { background: var(--danger-soft); color: var(--danger); border: 1px dashed var(--danger); }
 .tag--new { background: var(--danger-soft); color: var(--danger); }
 .tag--mark { background: var(--success-soft); color: var(--success); }
 
@@ -642,7 +643,8 @@ select.field { cursor: pointer; }
 }
 .hw-card__cover {
   position: relative;
-  aspect-ratio: 16 / 7;
+  /* 16/9 — обложки заметно выше, чем было (16/7): картинка почти не режется */
+  aspect-ratio: 16 / 9;
   background: var(--accent-soft);
   flex-shrink: 0;
 }
@@ -704,10 +706,43 @@ select.field { cursor: pointer; }
 }
 .hw-note__text {
   display: -webkit-box;
-  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
   overflow-wrap: anywhere;
+}
+/* Свёрнутое состояние — зажимаем до 3 строк; разворачивается кнопкой ниже */
+.hw-note__text.is-clamped {
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+}
+/* Кнопка «Показать ещё / Свернуть» под длинным комментарием */
+.hw-note__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.hw-note__toggle:hover { text-decoration: underline; }
+
+/* Цена пересдачи внутри кнопки «Запрос на пересдачу» (как на карточке оригинала: −2 топгема) */
+.hw-retake-price {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.4;
 }
 
 /* ─── Мобильная адаптация (v1.4) ─────────────────────────────────────────

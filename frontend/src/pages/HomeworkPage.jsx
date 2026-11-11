@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  ClipboardList, FlaskConical, FileDown, ExternalLink, ChevronDown, SearchX,
-  UploadCloud, Trash2, FileUp, Clock, Star, X, CloudUpload,
-  CalendarDays, CheckCircle2, FileText, MessageSquare, UserRound,
+  ClipboardList, FlaskConical, FileDown, ExternalLink, ChevronDown, ChevronUp, SearchX,
+  UploadCloud, Trash2, FileUp, Clock, Star, X, CloudUpload, RefreshCw, Gem,
+  CalendarDays, CheckCircle2, FileText, MessageSquare, UserRound, TriangleAlert,
 } from 'lucide-react'
 import {
   apiHomeworkList, apiSubmitHomework, apiDeleteHomework, apiGroupHistory,
@@ -50,12 +50,19 @@ function dedupePages(data) {
   return out
 }
 
+// Правило оригинального сайта: на проверку нельзя отправить ДЗ, просроченные
+// более чем на 200 дней (кнопку сдачи у таких работ не показываем вовсе)
+const OVERDUE_SUBMIT_LIMIT_DAYS = 200
+
 const BUCKET_META = {
   overdue: { sectionKey: 'hwSectionOverdue', tag: 'overdue' },
   dueSoon: { sectionKey: 'hwSectionDueSoon', tag: 'soon' }, // свой стиль, не как «На проверке»
   current: { sectionKey: 'hwSectionCurrent', tag: 'current' },
   checking: { sectionKey: 'hwSectionChecking', tag: 'checking' },
   checked: { sectionKey: 'hwSectionChecked', tag: 'checked' },
+  // «Удалённые ДЗ» — работы, чью сдачу удалил преподаватель (серверный status=5):
+  // студенту нужно выполнить их заново (delete_by_teach в оригинале)
+  deleted: { sectionKey: 'hwSectionDeleted', tag: 'deleted' },
 }
 
 export default function HomeworkPage() {
@@ -100,9 +107,31 @@ export default function HomeworkPage() {
   const hwQuery = useHomeworkInfinite(0, statusParam, groupId, specId)
   const labQuery = useHomeworkInfinite(1, statusParam, groupId, specId)
 
+  // «Удалённые ДЗ» (серверный status=5): работы, чью сдачу удалил преподаватель,
+  // чтобы студент выполнил их заново. Отдельный запрос всегда со status=5.
+  // Когда пользователь выбирает фильтр «Удалённые», основной список уходит
+  // с тем же status=5 — ключи запросов совпадают, лишнего обращения нет.
+  const delHwQuery = useHomeworkInfinite(0, HW_STATUS_PARAM.deleted, groupId, specId)
+  const delLabQuery = useHomeworkInfinite(1, HW_STATUS_PARAM.deleted, groupId, specId)
+
   // Страницы, склеенные без дублей (сервер повторяет работы между страницами)
   const hwItems = useMemo(() => dedupePages(hwQuery.data), [hwQuery.data])
   const labItems = useMemo(() => dedupePages(labQuery.data), [labQuery.data])
+  const delHwItems = useMemo(() => dedupePages(delHwQuery.data), [delHwQuery.data])
+  const delLabItems = useMemo(() => dedupePages(delLabQuery.data), [delLabQuery.data])
+
+  // Пул удалённых работ: идёт первым, чтобы при склейке удалить-версия
+  // победила встречу той же работы в общем списке «Все»
+  const deletedItems = useMemo(() => {
+    const out = []
+    const seen = new Set()
+    for (const it of [...delHwItems, ...delLabItems]) {
+      if (it?.id == null || seen.has(it.id)) continue
+      seen.add(it.id)
+      out.push(it)
+    }
+    return out
+  }, [delHwItems, delLabItems])
 
   // Предметы, найденные только в загруженных работах (в справочнике их нет)
   const extraSubjects = useMemo(() => {
@@ -117,8 +146,9 @@ export default function HomeworkPage() {
       })
     push(hwItems)
     push(labItems)
+    push(deletedItems)
     return out
-  }, [subjects, hwItems, labItems])
+  }, [subjects, hwItems, labItems, deletedItems])
 
   const allSubjects = useMemo(
     () => [...subjects, ...extraSubjects],
@@ -129,21 +159,34 @@ export default function HomeworkPage() {
   // только по уже загруженным шести работам)
   useEffect(() => {
     if (!search) return
-    for (const q of [hwQuery, labQuery]) {
+    for (const q of [hwQuery, labQuery, delHwQuery, delLabQuery]) {
       if (q.hasNextPage && !q.isFetchingNextPage) q.fetchNextPage()
     }
-  }, [search, hwQuery.hasNextPage, hwQuery.isFetchingNextPage, labQuery.hasNextPage, labQuery.isFetchingNextPage, hwQuery.data, labQuery.data]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [search, hwQuery.hasNextPage, hwQuery.isFetchingNextPage, labQuery.hasNextPage, labQuery.isFetchingNextPage, delHwQuery.hasNextPage, delHwQuery.isFetchingNextPage, delLabQuery.hasNextPage, delLabQuery.isFetchingNextPage, hwQuery.data, labQuery.data, delHwQuery.data, delLabQuery.data]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const items = useMemo(() => {
     const out = []
     const seen = new Set() // одна работа не показывается дважды (ДЗ и ЛР-списки)
-    const push = (list, type) => {
+    // Раскладка по бакетам:
+    //  «Все»          — удалённые (из status=5) идут первыми и получают свой бакет,
+    //                    остальное классифицирует hwBucket (вкл. автоединицу → просрочено);
+    //  «Удалённые»    — основной список и так запрошен со status=5, все бакеты — deleted;
+    //  прочие фильтры — удалённые не примешиваем, обычная классификация.
+    const showDeleted = statusFilter === 'all' || statusFilter === 'deleted'
+    const allDeleted = statusFilter === 'deleted'
+    const push = (list, type, forceDeleted = false) => {
       for (const it of Array.isArray(list) ? list : []) {
         if (seen.has(it.id)) continue
         seen.add(it.id)
-        out.push({ ...it, workType: type })
+        out.push({ ...it, workType: type, bucket: forceDeleted || allDeleted ? 'deleted' : hwBucket(it) })
       }
     }
+    // Удалённые (status=5) идут первыми — их версия работы приоритетна
+    if (showDeleted) {
+      if (typeFilter !== 'lab') push(delHwItems, 0, true)
+      if (typeFilter !== 'hw') push(delLabItems, 1, true)
+    }
+    // при «Удалённые» в этих списках те же работы (ключ запроса совпадает) — склеятся
     if (typeFilter !== 'lab') push(hwItems, 0)
     if (typeFilter !== 'hw') push(labItems, 1)
 
@@ -159,21 +202,25 @@ export default function HomeworkPage() {
           normalize(it.comment).includes(q)
         )
       })
-      .map((it) => ({ ...it, bucket: hwBucket(it) }))
-  }, [hwItems, labItems, typeFilter, search, subject])
+      // bucket уже проставлен в push(); map — страховка на будущее
+      .map((it) => (it.bucket ? it : { ...it, bucket: hwBucket(it) }))
+  }, [hwItems, labItems, delHwItems, delLabItems, typeFilter, search, subject, statusFilter])
 
   const totalLoaded =
     (typeFilter !== 'lab' ? hwItems.length : 0) +
-    (typeFilter !== 'hw' ? labItems.length : 0)
+    (typeFilter !== 'hw' ? labItems.length : 0) +
+    (statusFilter === 'all' || statusFilter === 'deleted' ? deletedItems.length : 0)
 
-  const loading = hwQuery.isLoading || labQuery.isLoading
+  const loading = hwQuery.isLoading || labQuery.isLoading || delHwQuery.isLoading || delLabQuery.isLoading
   const error = hwQuery.isError || labQuery.isError
-  const hasNext = hwQuery.hasNextPage || labQuery.hasNextPage
-  const fetchingMore = hwQuery.isFetchingNextPage || labQuery.isFetchingNextPage
+  const hasNext = hwQuery.hasNextPage || labQuery.hasNextPage || delHwQuery.hasNextPage || delLabQuery.hasNextPage
+  const fetchingMore = hwQuery.isFetchingNextPage || labQuery.isFetchingNextPage || delHwQuery.isFetchingNextPage || delLabQuery.isFetchingNextPage
 
   const loadMore = () => {
     if (hwQuery.hasNextPage) hwQuery.fetchNextPage()
     if (labQuery.hasNextPage) labQuery.fetchNextPage()
+    if (delHwQuery.hasNextPage) delHwQuery.fetchNextPage()
+    if (delLabQuery.hasNextPage) delLabQuery.fetchNextPage()
   }
 
   // «Ещё» подгружается само, когда конец списка виден на экране
@@ -226,7 +273,7 @@ export default function HomeworkPage() {
       <div className="card mb-4">
         <div className="flex flex-col gap-3">
           <SearchInput value={search} onChange={setSearch} placeholder={t('hwSearch')} />
-          {search && (hwQuery.hasNextPage || labQuery.hasNextPage) && (
+          {search && (hwQuery.hasNextPage || labQuery.hasNextPage || delHwQuery.hasNextPage || delLabQuery.hasNextPage) && (
             <p className="text-xs text-muted -mt-1">{t('hwSearchLoading')}</p>
           )}
 
@@ -248,6 +295,9 @@ export default function HomeworkPage() {
             <Chip active={statusFilter === 'checking'} onClick={() => setStatusFilter('checking')}>{t('hwStatusChecking')}</Chip>
             <Chip active={statusFilter === 'checked'} onClick={() => setStatusFilter('checked')}>{t('hwStatusChecked')}</Chip>
             <Chip active={statusFilter === 'overdue'} onClick={() => setStatusFilter('overdue')}>{t('hwStatusOverdue')}</Chip>
+            <Chip active={statusFilter === 'deleted'} onClick={() => setStatusFilter('deleted')} title={t('hwDeletedByTeach')}>
+              <Trash2 size={13} /> {t('hwStatusDeleted')}
+            </Chip>
           </div>
 
           {allSubjects.length > 0 && (
@@ -294,7 +344,7 @@ export default function HomeworkPage() {
 
           {sections ? (
             // Режим «Все статусы»: секции в порядке —
-            // просрочки → скоро сдавать → текущие → на проверке → проверено
+            // просрочки → скоро сдавать → текущие → на проверке → проверено → удалённые
             sections.map((sec) => (
               <div key={sec.bucket} className="mb-5">
                 <div className="flex items-center gap-2 mb-2">
@@ -335,6 +385,63 @@ export default function HomeworkPage() {
 }
 
 /**
+ * Примечание со сворачиванием: длинный текст по умолчанию зажат до трёх
+ * строк («изначально свёрнут»), кнопкой «Показать ещё» раскрывается целиком.
+ * Короткий текст показывается как есть — без лишней кнопки.
+ */
+function CollapseNote({ label, text, t, tone, icon }) {
+  const [open, setOpen] = useState(false)
+  const [clippable, setClippable] = useState(false)
+  const textRef = useRef(null)
+
+  // Заранее «длину в строках» не узнать — меряем факт: контент выше трёх строк?
+  // Меряем при АКТИВНОМ зажиме (свёрнутое состояние): scrollHeight — полная
+  // высота контента, clientHeight — высота трёх строк. Без зажима они равны.
+  const measure = () => {
+    if (open) return // в раскрытом виде зажима нет, мерить нечего
+    const el = textRef.current
+    if (!el) return
+    setClippable(el.scrollHeight > el.clientHeight + 2)
+  }
+  useEffect(() => {
+    measure()
+    // шрифты догружаются и окно меняет ширину — раскладка пересчитывается
+    window.addEventListener('resize', measure)
+    const tmr = setTimeout(measure, 350)
+    return () => {
+      window.removeEventListener('resize', measure)
+      clearTimeout(tmr)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text])
+
+  return (
+    <div className={`hw-note ${tone === 'teacher' ? 'hw-note--teacher' : ''}`}>
+      {icon}
+      <div className="min-w-0 flex-1">
+        <div
+          ref={textRef}
+          className={`hw-note__text ${!open ? 'is-clamped' : ''}`}
+        >
+          <b>{label}:</b> {text}
+        </div>
+        {clippable && (
+          <button
+            type="button"
+            className="hw-note__toggle"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+          >
+            {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            {open ? t('hwShowLess') : t('hwShowMore')}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/**
  * Карточка одной работы — как на оригинальном сайте:
  * обложка задания, предмет, тема, преподаватель, сроки, файлы,
  * текст ответа, комментарии преподавателя, статус и оценка.
@@ -348,8 +455,33 @@ function HwCard({ it, t, fmtShort }) {
   const isLab = it.workType === 1
   const hs = it.homework_stud
   const mark = hs?.mark
-  const canSubmit = !hs
-  const canDelete = Boolean(hs) && mark == null
+
+  // Сколько дней прошло с дедлайна (0 — не просрочено)
+  const left = daysUntil(it.overdue_time)
+  const daysOverdue = left != null && left < 0 ? Math.abs(left) : 0
+  const expiredTooLong = daysOverdue > OVERDUE_SUBMIT_LIMIT_DAYS
+
+  // Автоединица — система сама поставила «1» за просрочку; это «Просрочено», не «Проверено»
+  const isAutoOverdue = Boolean(hs?.auto_mark) && Number(hs?.mark) === 1
+  const isDeleted = it.bucket === 'deleted'
+
+  // «Выполнено с опозданием»: сдача позже дедлайна (сравнение дат, как isOverdue в оригинале)
+  const isLateSubmit = Boolean(
+    hs?.creation_time && it.overdue_time &&
+    String(hs.creation_time).slice(0, 10) > String(it.overdue_time).slice(0, 10)
+  )
+
+  // Правила сдачи — повторяют helper.canUpload оригинала (статус «просрочено»/«текущее»):
+  //  • нет сдачи («Текущее»/«Просрочено») → «Сдать работу»;
+  //  • автоединица («Просрочено») → сдать можно повторно;
+  //  • «Удалённые ДЗ» → сдать заново, даже если запись о сдаче осталась;
+  //  • сдано и ещё на проверке → сдать нельзя (можно только удалить работу);
+  //  • проверено и сдано вовремя → «Запрос на пересдачу» (−2 топгема);
+  //  • проверено, но сдано с опозданием → только пометка «Выполнено с опозданием»;
+  //  • просрочка больше 200 дней → кнопки сдачи нет.
+  const canSubmit = (!hs || isAutoOverdue || isDeleted) && !expiredTooLong
+  const canRetake = Boolean(hs) && mark != null && !isAutoOverdue && !isLateSubmit && !isDeleted
+  const canDelete = Boolean(hs) && mark == null && !isAutoOverdue && !isDeleted
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['hw-list'] })
@@ -371,7 +503,6 @@ function HwCard({ it, t, fmtShort }) {
   })
 
   const meta = BUCKET_META[it.bucket]
-  const left = daysUntil(it.overdue_time)
   const deadlineInfo =
     it.bucket === 'overdue'
       ? t('hwOverdueBy', { n: Math.abs(left) })
@@ -379,7 +510,14 @@ function HwCard({ it, t, fmtShort }) {
         ? left === 0 ? t('hwDueToday') : t('hwDaysLeft', { n: left })
         : null
 
-  const teacherComment = String(it.homework_comment || '').trim()
+  // Комментарий преподавателя к выполненной работе приходит ОБЪЕКТОМ:
+  // { text_comment, attachment, attachment_path, date_updated }.
+  // Раньше String(obj) выводил «[object Object]» — теперь читаем поля по отдельности.
+  const hcRaw = it.homework_comment
+  const hc = hcRaw && typeof hcRaw === 'object' ? hcRaw : null
+  const teacherComment = String((hc ? hc.text_comment : hcRaw) || '').trim()
+  const teacherAttachPath = hc?.attachment_path || null
+  const teacherAttachName = String(hc?.attachment || '').trim() || t('hwTeacherAttach')
   const taskComment = String(it.comment || '').trim()
   const myAnswer = String(hs?.stud_answer || '').trim()
 
@@ -441,7 +579,7 @@ function HwCard({ it, t, fmtShort }) {
           )}
         </div>
 
-        {(it.file_path || hs?.file_path) && (
+        {(it.file_path || hs?.file_path || teacherAttachPath) && (
           <div className="flex flex-wrap gap-1.5">
             {it.file_path && (
               <a
@@ -469,6 +607,19 @@ function HwCard({ it, t, fmtShort }) {
                 <ExternalLink size={13} className="shrink-0" />
               </a>
             )}
+            {teacherAttachPath && (
+              <a
+                className="hw-attach"
+                href={teacherAttachPath}
+                target="_blank"
+                rel="noreferrer"
+                title={teacherAttachName}
+              >
+                <MessageSquare size={13} className="shrink-0" />
+                <span className="truncate" style={{ maxWidth: 200 }}>{teacherAttachName}</span>
+                <ExternalLink size={13} className="shrink-0" />
+              </a>
+            )}
           </div>
         )}
 
@@ -477,15 +628,45 @@ function HwCard({ it, t, fmtShort }) {
             <span className="hw-note__text"><b>{t('hwMyAnswer')}:</b> {myAnswer}</span>
           </div>
         )}
-        {taskComment && (
-          <div className="hw-note" title={taskComment}>
-            <span className="hw-note__text"><b>{t('hwTaskComment')}:</b> {taskComment}</span>
+        {/* Комментарий к заданию — по умолчанию свёрнут (до 3 строк),
+            длинный текст раскрывается кнопкой «Показать ещё» */}
+        {taskComment && <CollapseNote label={t('hwTaskComment')} text={taskComment} t={t} />}
+        {/* Комментарий преподавателя к выполненной работе (текст + вложение) */}
+        {teacherComment && (
+          <CollapseNote
+            label={t('hwTeacherComment')}
+            text={teacherComment}
+            t={t}
+            tone="teacher"
+            icon={<MessageSquare size={13} className="shrink-0" style={{ color: 'var(--accent)', marginTop: 2 }} />}
+          />
+        )}
+        {isAutoOverdue && (
+          <div className="hw-note" style={{ borderColor: 'var(--danger-soft)' }}>
+            <TriangleAlert size={13} className="shrink-0" style={{ color: 'var(--danger)', marginTop: 2 }} />
+            <span className="hw-note__text">
+              <b>{t('hwMark')}: 1</b> — {t('hwAutoMarkExpired')}
+            </span>
           </div>
         )}
-        {teacherComment && (
-          <div className="hw-note hw-note--teacher" title={teacherComment}>
-            <MessageSquare size={13} className="shrink-0" style={{ color: 'var(--accent)', marginTop: 2 }} />
-            <span className="hw-note__text"><b>{t('hwTeacherComment')}:</b> {teacherComment}</span>
+        {isDeleted && (
+          <div className="hw-note" style={{ borderColor: 'var(--danger-soft)' }}>
+            <TriangleAlert size={13} className="shrink-0" style={{ color: 'var(--danger)', marginTop: 2 }} />
+            <span className="hw-note__text">{t('hwRedoHint')}</span>
+          </div>
+        )}
+        {/* Сдано позже дедлайна — как в оригинале («Done late»); пересдача такой работе недоступна */}
+        {isLateSubmit && mark != null && (
+          <div className="hw-note">
+            <Clock size={13} className="shrink-0" style={{ color: 'var(--warning)', marginTop: 2 }} />
+            <span className="hw-note__text">{t('hwDoneLate')}</span>
+          </div>
+        )}
+        {/* Слишком старая просрочка (более 200 дней) — сервер её всё равно не примет */}
+        {expiredTooLong && (isAutoOverdue || !hs) && (
+          <div className="hw-note" style={{ borderColor: 'var(--danger-soft)' }}>
+            <TriangleAlert size={13} className="shrink-0" style={{ color: 'var(--danger)', marginTop: 2 }} />
+            <span className="hw-note__text">{t('hwTooOldSubmit')}</span>
           </div>
         )}
 
@@ -507,12 +688,21 @@ function HwCard({ it, t, fmtShort }) {
           </div>
         )}
 
-        {(canSubmit || canDelete) && (
-          <div className="flex items-center gap-2 mt-auto pt-2">
+        {(canSubmit || canRetake || canDelete) && (
+          <div className="flex flex-wrap items-center gap-2 mt-auto pt-2">
             {canSubmit && (
               <button className="btn btn--primary !py-2 !px-3 text-xs" onClick={() => setSubmitOpen(true)} title={t('hwSubmit')}>
                 <UploadCloud size={14} />
                 {t('hwSubmit')}
+              </button>
+            )}
+            {/* «Запрос на пересдачу» (оригинальная кнопка request_resit):
+                открывает то же окно сдачи, сервер списывает −2 топгема */}
+            {canRetake && (
+              <button className="btn btn--primary !py-2 !px-3 text-xs" onClick={() => setSubmitOpen(true)} title={t('hwRetake')}>
+                <RefreshCw size={14} />
+                {t('hwRetake')}
+                <span className="hw-retake-price">−2 <Gem size={11} /></span>
               </button>
             )}
             {canDelete && (
@@ -528,6 +718,7 @@ function HwCard({ it, t, fmtShort }) {
       {submitOpen && (
         <SubmitModal
           hw={it}
+          retake={canRetake}
           onClose={() => setSubmitOpen(false)}
           onDone={(m) => { if (m) setMsg(m); invalidate() }}
         />
@@ -549,9 +740,10 @@ const HW_MIN_TEXT = 5
 const HW_MAX_TEXT = 500
 const HW_BAD_EXT = ['txt', 'csv'] // как в оригинале: .txt и .csv запрещены
 
-function SubmitModal({ hw, onClose, onDone }) {
+function SubmitModal({ hw, retake = false, onClose, onDone }) {
   const { t } = useI18n()
   const { user } = useAuth()
+  const isLab = hw?.workType === 1
   const [answer, setAnswer] = useState('')
   const [file, setFile] = useState(null)
   const [fileErr, setFileErr] = useState(null)
@@ -630,7 +822,17 @@ function SubmitModal({ hw, onClose, onDone }) {
       onDone({ ok: true, text: t('hwSubmitOk') })
       onClose()
     } catch (e) {
-      setError(e?.message || t('hwSubmitFail'))
+      // Коды ошибок сервера — как в оригинале (HomeworkError):
+      // 3001 «недостаточно средств», 3002 «не удалось пересдать»,
+      // 3003 «не удалось сохранить ДЗ», 3004 «не удалось сохранить файл»
+      const raw = e?.payload
+      const code = raw?.error?.code ?? raw?.code ?? (Array.isArray(raw) ? raw[0]?.code : undefined)
+      const key =
+        code === 3001 ? 'hwErrNotFunds' :
+        code === 3002 ? 'hwErrUnableRetake' :
+        code === 3003 ? 'hwErrUnableSave' :
+        code === 3004 ? 'hwErrUnableUpload' : null
+      setError(key ? t(key) : (e?.message || t('hwSubmitFail')))
     }
   }
 
@@ -646,14 +848,22 @@ function SubmitModal({ hw, onClose, onDone }) {
       >
         <div className="flex items-center justify-between mb-3">
           <h3 className="card__title !mb-0">
-            <FileUp size={18} />
-            {t('hwSubmitTitle')}
+            {retake ? <RefreshCw size={18} /> : <FileUp size={18} />}
+            {retake ? (isLab ? t('hwRetakeTitleLab') : t('hwRetakeTitle')) : t('hwSubmitTitle')}
           </h3>
           <button className="icon-btn" onClick={onClose} aria-label={t('hwDecline')}>
             <X size={16} />
           </button>
         </div>
         <p className="text-xs text-muted mt-0 mb-3 truncate">{hw.theme} · {hw.name_spec}</p>
+
+        {/* Пересдача: предупреждение о плате (как на карточке оригинала «−2 топгема») */}
+        {retake && (
+          <div className="hw-note mb-3" style={{ borderColor: 'var(--warning-soft)' }}>
+            <Gem size={13} className="shrink-0" style={{ color: 'var(--warning)', marginTop: 2 }} />
+            <span className="hw-note__text">{t('hwRetakePrice')}</span>
+          </div>
+        )}
 
         <div className="modal-scroll flex flex-col gap-3">
           {/* Файл: drag&drop + выбор по клику */}
